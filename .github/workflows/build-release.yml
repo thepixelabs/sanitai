@@ -1,14 +1,12 @@
 name: Build & Publish Release
+
 on:
   push:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-  id-token: write
-  packages: write
-  attestations: write
+# Deny all by default; each job grants only what it needs.
+permissions: {}
 
 env:
   RUST_TOOLCHAIN: "1.87.0"
@@ -17,6 +15,9 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +37,6 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             cross: true
-    runs-on: ${{ matrix.os }}
     outputs:
       sha_aarch64_apple_darwin: ${{ steps.hash.outputs.sha_aarch64_apple_darwin }}
       sha_x86_64_apple_darwin: ${{ steps.hash.outputs.sha_x86_64_apple_darwin }}
@@ -45,7 +45,7 @@ jobs:
       sha_x86_64_unknown_linux_musl: ${{ steps.hash.outputs.sha_x86_64_unknown_linux_musl }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
@@ -58,12 +58,12 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.87.0"
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           key: ${{ matrix.target }}
 
@@ -75,6 +75,13 @@ jobs:
           fi
           git diff --exit-code Cargo.lock
 
+      - name: Cache pip downloads
+        if: matrix.cross == true
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-ziglang-${{ hashFiles('.github/workflows/build-release.yml') }}
+
       - name: Install zig + cargo-zigbuild (Linux cross targets)
         if: matrix.cross == true
         run: |
@@ -85,7 +92,7 @@ jobs:
         if: matrix.cross == true
         env:
           SOURCE_DATE_EPOCH: "0"
-          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols"
+          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols --remap-path-prefix=${{ github.workspace }}=."
           CARGO_PROFILE_RELEASE_LTO: "true"
         run: |
           cargo zigbuild --release --locked --target ${{ matrix.target }} --workspace --bin ${{ env.BIN_NAME }}
@@ -94,7 +101,7 @@ jobs:
         if: matrix.cross == false
         env:
           SOURCE_DATE_EPOCH: "0"
-          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols"
+          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols --remap-path-prefix=${{ github.workspace }}=."
           CARGO_PROFILE_RELEASE_LTO: "true"
         run: |
           cargo build --release --locked --target ${{ matrix.target }} --workspace --bin ${{ env.BIN_NAME }}
@@ -122,7 +129,6 @@ jobs:
           cp README.md "$STAGE/" 2>/dev/null || true
           cp LICENSE* "$STAGE/" 2>/dev/null || true
           ARCHIVE="${{ env.BIN_NAME }}-${VERSION}-${TARGET}.tar.gz"
-          # Reproducible tar: sorted, fixed mtime, numeric owner
           tar --sort=name \
               --mtime='UTC 1970-01-01' \
               --owner=0 --group=0 --numeric-owner \
@@ -147,7 +153,7 @@ jobs:
           echo "sha_${TARGET_KEY}=${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -165,20 +171,18 @@ jobs:
       contents: read
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           pattern: release-*
           merge-multiple: true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
         with:
           cosign-release: 'v2.2.4'
 
       - name: Sign each archive (keyless OIDC)
-        env:
-          COSIGN_EXPERIMENTAL: "1"
         run: |
           cd dist
           for f in *.tar.gz; do
@@ -193,7 +197,7 @@ jobs:
           ls -la
 
       - name: Upload signatures
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signatures
           path: |
@@ -206,11 +210,13 @@ jobs:
     name: Collect hashes for provenance
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           pattern: release-*
@@ -229,7 +235,7 @@ jobs:
       id-token: write
       contents: write
       actions: read
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@5a775b367a56d5bd118a224a811bba288150a563 # v2.0.0
     with:
       base64-subjects: ${{ needs.provenance-hashes.outputs.hashes }}
       upload-assets: true
@@ -238,11 +244,13 @@ jobs:
     name: Generate SBOM
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.87.0"
       - name: Install cargo-cyclonedx
@@ -255,7 +263,7 @@ jobs:
           find . -name 'sbom.cyclonedx.json' -not -path './dist/*' -exec cp {} dist/ \;
           ls -la dist/
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sbom
           path: dist/sbom.cyclonedx.json
@@ -276,7 +284,7 @@ jobs:
       sha_linux_arm64: ${{ steps.shas.outputs.sha_linux_arm64 }}
       sha_linux_musl_x64: ${{ steps.shas.outputs.sha_linux_musl_x64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
       - name: Extract release version
@@ -288,20 +296,20 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           pattern: release-*
           merge-multiple: true
 
       - name: Download signatures
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: signatures
           path: dist
 
       - name: Download SBOM
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sbom
           path: dist
@@ -326,7 +334,6 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           gh release create "$TAG" --generate-notes --verify-tag
           cd dist
-          # Upload every artifact in dist/
           gh release upload "$TAG" \
             *.tar.gz \
             *.sha256 \
@@ -339,6 +346,7 @@ jobs:
     name: Trigger Homebrew tap update
     needs: release
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Dispatch new-release event to homebrew-sanitai
         env:
@@ -349,7 +357,7 @@ jobs:
           SHA_LINUX_X64: ${{ needs.release.outputs.sha_linux_x64 }}
           SHA_LINUX_ARM64: ${{ needs.release.outputs.sha_linux_arm64 }}
         run: |
-          gh api repos/sanitai/homebrew-sanitai/dispatches \
+          gh api repos/thepixelabs/homebrew-sanitai/dispatches \
             --field event_type=new-release \
             --field "client_payload[version]=${RELEASE_VERSION}" \
             --field "client_payload[sha256_macos_arm64]=${SHA_MACOS_ARM64}" \
