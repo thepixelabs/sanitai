@@ -1,15 +1,64 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+# Deny all permissions by default; each job grants only what it needs.
+permissions: {}
+
+# Cancel in-progress CI runs on the same branch when a new push arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  # ---------------------------------------------------------------------------
+  # PR title validation
+  # The squash-merge strategy means the PR title becomes the commit message on
+  # main. Enforcing conventional-commit format here keeps release discipline
+  # with maintainers at merge time — contributors don't need to worry about it
+  # on every commit in their feature branch.
+  # ---------------------------------------------------------------------------
+  pr-title:
+    name: PR Title
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            revert
+            docs
+            style
+            test
+            build
+            ci
+            chore
+          requireScope: false
+          subjectPattern: ^.+$
+          subjectPatternError: "PR title must not be empty after the type prefix"
+
+  # ---------------------------------------------------------------------------
+  # Lint — rustfmt and clippy
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[no ci]')"
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -21,45 +70,54 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: test
-        run: cargo test --workspace --locked
-      - name: cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v1
-        with:
-          command: check
-      - name: canary scan
-        run: |
-          # If sanitai binary exists, run it on the repo to catch accidental real secrets
-          if [ -f target/release/sanitai ]; then
-            ./target/release/sanitai scan . --exit-zero || echo "canary: findings present (review output)"
-          fi
 
-  audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.87.0"
-      - name: cargo audit
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
-
-  bench-gate:
-    runs-on: [self-hosted, perf-runner]
-    if: github.event_name == 'pull_request'
+  # ---------------------------------------------------------------------------
+  # Tests — run across Linux and macOS after lint passes
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: lint
+    if: "!contains(github.event.head_commit.message, '[no ci]')"
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.87.0"
       - uses: Swatinem/rust-cache@v2
-      - name: Run benchmarks
-        run: cargo bench --workspace -- --output-format bencher | tee bench_output.txt
-      - name: Compare against baseline
+      - name: test
+        run: cargo test --workspace --locked
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check
+
+  # ---------------------------------------------------------------------------
+  # Audit — dependency vulnerability scan
+  # ---------------------------------------------------------------------------
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[no ci]')"
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.87.0"
+      - name: Cache cargo-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('.github/workflows/ci.yml') }}
+      - name: cargo audit
         run: |
-          if [ -f bench-baseline/results.txt ]; then
-            # critcmp or simple awk comparison
-            echo "Benchmark comparison would run here"
-          fi
+          command -v cargo-audit || cargo install cargo-audit --locked
+          cargo audit

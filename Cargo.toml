@@ -12,6 +12,9 @@ members = [
   "tools/differential",
 ]
 
+[workspace.package]
+version = "0.1.0"
+
 [workspace.dependencies]
 # Error handling
 thiserror  = "1"
