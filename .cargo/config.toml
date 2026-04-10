@@ -1,0 +1,9 @@
+[build]
+# Treat all warnings as errors in CI. Set via RUSTFLAGS in CI, not here,
+# so local dev doesn't fail on every warning during iteration.
+# rustflags = ["-D", "warnings"]
+
+[env]
+# Reproducible builds: zero out embedded timestamps
+SOURCE_DATE_EPOCH = "0"
+

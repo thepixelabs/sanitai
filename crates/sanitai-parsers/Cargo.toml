@@ -1,0 +1,16 @@
+[package]
+name    = "sanitai-parsers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sanitai-core = { path = "../sanitai-core" }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+toml         = { workspace = true }
+futures      = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+walkdir      = { workspace = true }
+glob         = { workspace = true }
+dirs-next    = { workspace = true }

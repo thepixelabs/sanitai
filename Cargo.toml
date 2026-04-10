@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/sanitai-core",
+  "crates/sanitai-detectors",
+  "crates/sanitai-parsers",
+  "crates/sanitai-redactor",
+  "crates/sanitai-sandbox",
+  "crates/sanitai-cli",
+  "crates/sanitai-fixtures",
+  "tools/corpus-gen",
+  "tools/differential",
+]
+
+[workspace.dependencies]
+# Error handling
+thiserror  = "1"
+anyhow     = "1"
+
+# Serialization
+serde      = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+toml       = "0.8"
+
+# Memory safety
+zeroize    = { version = "1", features = ["derive"] }
+secrecy    = "0.10"
+
+# Detection
+regex      = "1"
+fancy-regex = "0.13"
+
+# Concurrency
+crossbeam-channel = "0.5"
+rayon             = "1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+figment   = { version = "0.10", features = ["toml", "env"] }
+schemars  = "0.8"
+
+# Async (for parser streams)
+futures = "0.3"
+
+# Filesystem traversal / discovery
+walkdir   = "2"
+glob      = "0.3"
+dirs-next = "2"
+
+# Crypto primitives (redactor)
+hmac      = "0.12"
+sha2      = "0.10"
+getrandom = "0.2"
+
+# Property-based testing
+proptest = "1"
+
+# Test scratch space (dev-deps only)
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+panic         = "abort"
+strip         = "symbols"
+lto           = "fat"
+overflow-checks = true
+
+[profile.dev]
+overflow-checks = true

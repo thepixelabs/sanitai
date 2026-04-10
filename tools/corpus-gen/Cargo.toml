@@ -1,0 +1,17 @@
+[package]
+name    = "corpus-gen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "corpus-gen"
+path = "src/main.rs"
+
+[dependencies]
+sanitai-fixtures = { path = "../../crates/sanitai-fixtures" }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+rand             = { version = "0.8", features = ["small_rng"] }
+clap             = { workspace = true }
+anyhow           = { workspace = true }

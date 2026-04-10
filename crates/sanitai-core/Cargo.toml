@@ -1,0 +1,20 @@
+[package]
+name    = "sanitai-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror  = { workspace = true }
+serde      = { workspace = true }
+zeroize    = { workspace = true }
+secrecy    = { workspace = true }
+tracing    = { workspace = true }
+figment    = { workspace = true }
+schemars   = { workspace = true }
+futures    = { workspace = true }
+toml       = { workspace = true }
+libc       = "0.2"
+dirs-next  = { workspace = true }
+
+[dev-dependencies]
+proptest   = { workspace = true }

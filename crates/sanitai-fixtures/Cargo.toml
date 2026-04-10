@@ -1,0 +1,13 @@
+[package]
+name    = "sanitai-fixtures"
+version = "0.1.0"
+edition = "2021"
+
+# This crate is only for dev/test use — never a runtime dependency
+[dev-dependencies]
+sanitai-core = { path = "../sanitai-core" }
+
+[dependencies]
+# rand with a seedable PRNG so fixtures are reproducible
+rand       = { version = "0.8", features = ["small_rng"] }
+thiserror  = { workspace = true }

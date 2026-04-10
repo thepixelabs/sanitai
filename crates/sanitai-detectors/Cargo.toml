@@ -1,0 +1,17 @@
+[package]
+name    = "sanitai-detectors"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sanitai-core = { path = "../sanitai-core" }
+regex        = { workspace = true }
+fancy-regex  = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+zeroize      = { workspace = true }
+base64       = "0.22"
+hex          = "0.4"
+flate2       = "1"
+twox-hash    = "1.6"
+percent-encoding = "2"

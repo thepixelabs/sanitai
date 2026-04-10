@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# .githooks/pre-push
+#
+# Blocks a `git push` if sanitai finds real (non-synthetic) secrets in the
+# files being pushed.
+#
+# Synthetic findings — those whose matched text contains the literal marker
+# "SANITAI_FAKE" — are silently ignored (exit 0). This allows test fixtures
+# and canary strings to live in the repo without tripping the hook.
+#
+# Environment overrides:
+#   SANITAI_BIN        path to the sanitai binary (default: sanitai on PATH)
+#   SANITAI_SKIP_HOOK  set to any non-empty value to bypass this hook entirely
+
+set -euo pipefail
+
+if [ -n "${SANITAI_SKIP_HOOK:-}" ]; then
+  echo "[sanitai pre-push] SANITAI_SKIP_HOOK set — skipping scan." >&2
+  exit 0
+fi
+
+SANITAI_BIN="${SANITAI_BIN:-sanitai}"
+
+if ! command -v "$SANITAI_BIN" &>/dev/null; then
+  echo "[sanitai pre-push] WARNING: '$SANITAI_BIN' not found on PATH — skipping scan." >&2
+  echo "[sanitai pre-push] Install with: brew install sanitai/sanitai/sanitai" >&2
+  exit 0
+fi
+
+ZERO_SHA="0000000000000000000000000000000000000000"
+declare -a FILES=()
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "$ZERO_SHA" ]; then
+    continue
+  fi
+
+  if [ "$remote_sha" = "$ZERO_SHA" ]; then
+    base_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+                  | sed 's|refs/remotes/origin/||') || base_branch="main"
+    merge_base=$(git merge-base "$local_sha" "refs/remotes/origin/${base_branch}" 2>/dev/null \
+                 || echo "")
+    if [ -n "$merge_base" ]; then
+      range="${merge_base}..${local_sha}"
+    else
+      range="${local_sha}"
+    fi
+  else
+    range="${remote_sha}..${local_sha}"
+  fi
+
+  while IFS= read -r path; do
+    [ -n "$path" ] && FILES+=("$path")
+  done < <(git diff --name-only "$range" 2>/dev/null || true)
+done
+
+if [ ${#FILES[@]} -eq 0 ]; then
+  exit 0
+fi
+
+mapfile -t UNIQUE_FILES < <(printf '%s\n' "${FILES[@]}" | sort -u)
+
+declare -a EXISTING=()
+for f in "${UNIQUE_FILES[@]}"; do
+  [ -f "$f" ] && EXISTING+=("$f")
+done
+
+if [ ${#EXISTING[@]} -eq 0 ]; then
+  exit 0
+fi
+
+echo "[sanitai pre-push] Scanning ${#EXISTING[@]} file(s) for leaked secrets..." >&2
+
+SCAN_ARGS=("scan")
+for f in "${EXISTING[@]}"; do
+  SCAN_ARGS+=("--file" "$f")
+done
+
+EXIT_CODE=0
+"$SANITAI_BIN" "${SCAN_ARGS[@]}" >&2 || EXIT_CODE=$?
+
+case $EXIT_CODE in
+  0)
+    echo "[sanitai pre-push] Clean — no real secrets found." >&2
+    exit 0
+    ;;
+  1)
+    echo "" >&2
+    echo "[sanitai pre-push] PUSH BLOCKED: real secrets detected in staged files." >&2
+    echo "[sanitai pre-push] Rotate the exposed credential, then remove it from" >&2
+    echo "[sanitai pre-push] the file and from git history before pushing." >&2
+    echo "[sanitai pre-push] To skip (DANGEROUS): SANITAI_SKIP_HOOK=1 git push" >&2
+    exit 1
+    ;;
+  *)
+    echo "[sanitai pre-push] WARNING: sanitai exited with code $EXIT_CODE (tool error)." >&2
+    echo "[sanitai pre-push] Allowing push — fix the sanitai installation to re-enable." >&2
+    exit 0
+    ;;
+esac

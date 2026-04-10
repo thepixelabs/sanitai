@@ -1,0 +1,12 @@
+[package]
+name    = "sanitai-redactor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sanitai-core = { path = "../sanitai-core" }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+hmac         = { workspace = true }
+sha2         = { workspace = true }
+getrandom    = { workspace = true }

@@ -1,0 +1,23 @@
+name: Weekly Audit
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Monday 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.87.0"
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+      - name: cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v1
+      - name: Notify on failure
+        if: failure()
+        run: echo "Audit failed — check GitHub Actions for details"

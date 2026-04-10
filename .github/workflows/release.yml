@@ -1,0 +1,358 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+  attestations: write
+
+env:
+  RUST_TOOLCHAIN: "1.87.0"
+  BIN_NAME: sanitai
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+    runs-on: ${{ matrix.os }}
+    outputs:
+      sha_aarch64_apple_darwin: ${{ steps.hash.outputs.sha_aarch64_apple_darwin }}
+      sha_x86_64_apple_darwin: ${{ steps.hash.outputs.sha_x86_64_apple_darwin }}
+      sha_x86_64_unknown_linux_gnu: ${{ steps.hash.outputs.sha_x86_64_unknown_linux_gnu }}
+      sha_aarch64_unknown_linux_gnu: ${{ steps.hash.outputs.sha_aarch64_unknown_linux_gnu }}
+      sha_x86_64_unknown_linux_musl: ${{ steps.hash.outputs.sha_x86_64_unknown_linux_musl }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Extract release version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.87.0"
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Verify Cargo.lock is committed and unchanged
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            echo "Cargo.lock is not committed to the repository"
+            exit 1
+          fi
+          git diff --exit-code Cargo.lock
+
+      - name: Install zig + cargo-zigbuild (Linux cross targets)
+        if: matrix.cross == true
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+
+      - name: Build (Linux, cargo-zigbuild)
+        if: matrix.cross == true
+        env:
+          SOURCE_DATE_EPOCH: "0"
+          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols"
+          CARGO_PROFILE_RELEASE_LTO: "true"
+        run: |
+          cargo zigbuild --release --locked --target ${{ matrix.target }} --workspace --bin ${{ env.BIN_NAME }}
+
+      - name: Build (macOS, native)
+        if: matrix.cross == false
+        env:
+          SOURCE_DATE_EPOCH: "0"
+          RUSTFLAGS: "-C codegen-units=1 -C strip=symbols"
+          CARGO_PROFILE_RELEASE_LTO: "true"
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} --workspace --bin ${{ env.BIN_NAME }}
+
+      - name: Strip binary (belt-and-braces)
+        run: |
+          BIN_PATH="target/${{ matrix.target }}/release/${{ env.BIN_NAME }}"
+          if [ -f "$BIN_PATH" ]; then
+            if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+              strip -x "$BIN_PATH" || true
+            else
+              strip "$BIN_PATH" || true
+            fi
+          fi
+
+      - name: Create archive
+        id: archive
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          BIN_PATH="target/${TARGET}/release/${{ env.BIN_NAME }}"
+          STAGE="dist/${{ env.BIN_NAME }}-${VERSION}-${TARGET}"
+          mkdir -p "$STAGE"
+          cp "$BIN_PATH" "$STAGE/"
+          cp README.md "$STAGE/" 2>/dev/null || true
+          cp LICENSE* "$STAGE/" 2>/dev/null || true
+          ARCHIVE="${{ env.BIN_NAME }}-${VERSION}-${TARGET}.tar.gz"
+          # Reproducible tar: sorted, fixed mtime, numeric owner
+          tar --sort=name \
+              --mtime='UTC 1970-01-01' \
+              --owner=0 --group=0 --numeric-owner \
+              -czf "dist/${ARCHIVE}" -C dist "${{ env.BIN_NAME }}-${VERSION}-${TARGET}" \
+              2>/dev/null || \
+          tar -czf "dist/${ARCHIVE}" -C dist "${{ env.BIN_NAME }}-${VERSION}-${TARGET}"
+          echo "archive=dist/${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "archive_name=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA-256
+        id: hash
+        run: |
+          ARCHIVE="${{ steps.archive.outputs.archive }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            SHA=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          else
+            SHA=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
+          fi
+          echo "${SHA}  $(basename ${ARCHIVE})" > "${ARCHIVE}.sha256"
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          TARGET_KEY=$(echo "${{ matrix.target }}" | tr '-' '_')
+          echo "sha_${TARGET_KEY}=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+  sign:
+    name: Sign artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.4'
+
+      - name: Sign each archive (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cd dist
+          for f in *.tar.gz; do
+            echo "Signing $f"
+            cosign sign-blob \
+              --yes \
+              --oidc-issuer=https://token.actions.githubusercontent.com \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.cert" \
+              "$f"
+          done
+          ls -la
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: signatures
+          path: |
+            dist/*.sig
+            dist/*.cert
+          retention-days: 7
+          if-no-files-found: error
+
+  provenance-hashes:
+    name: Collect hashes for provenance
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hashes.outputs.hashes }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+      - name: Generate base64-encoded SHA-256 manifest
+        id: hashes
+        run: |
+          cd dist
+          HASHES=$(sha256sum *.tar.gz | base64 -w0)
+          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
+
+  provenance:
+    name: SLSA provenance
+    needs: provenance-hashes
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: ${{ needs.provenance-hashes.outputs.hashes }}
+      upload-assets: true
+
+  sbom:
+    name: Generate SBOM
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.87.0"
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --override-filename sbom.cyclonedx
+      - name: Collect SBOM
+        run: |
+          mkdir -p dist
+          find . -name 'sbom.cyclonedx.json' -not -path './dist/*' -exec cp {} dist/ \;
+          ls -la dist/
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: dist/sbom.cyclonedx.json
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build, sign, provenance, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha_macos_arm64: ${{ steps.shas.outputs.sha_macos_arm64 }}
+      sha_macos_x64: ${{ steps.shas.outputs.sha_macos_x64 }}
+      sha_linux_x64: ${{ steps.shas.outputs.sha_linux_x64 }}
+      sha_linux_arm64: ${{ steps.shas.outputs.sha_linux_arm64 }}
+      sha_linux_musl_x64: ${{ steps.shas.outputs.sha_linux_musl_x64 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Extract release version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Download signatures
+        uses: actions/download-artifact@v4
+        with:
+          name: signatures
+          path: dist
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: dist
+
+      - name: Export per-target SHA-256 outputs
+        id: shas
+        run: |
+          cd dist
+          get_sha() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+          VERSION="${{ steps.version.outputs.version }}"
+          BIN=sanitai
+          echo "sha_macos_arm64=$(get_sha ${BIN}-${VERSION}-aarch64-apple-darwin.tar.gz)" >> "$GITHUB_OUTPUT"
+          echo "sha_macos_x64=$(get_sha ${BIN}-${VERSION}-x86_64-apple-darwin.tar.gz)" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_x64=$(get_sha ${BIN}-${VERSION}-x86_64-unknown-linux-gnu.tar.gz)" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_arm64=$(get_sha ${BIN}-${VERSION}-aarch64-unknown-linux-gnu.tar.gz)" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_musl_x64=$(get_sha ${BIN}-${VERSION}-x86_64-unknown-linux-musl.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release create "$TAG" --generate-notes --verify-tag
+          cd dist
+          # Upload every artifact in dist/
+          gh release upload "$TAG" \
+            *.tar.gz \
+            *.sha256 \
+            *.sig \
+            *.cert \
+            sbom.cyclonedx.json \
+            --clobber
+
+  dispatch-tap:
+    name: Trigger Homebrew tap update
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch new-release event to homebrew-sanitai
+        env:
+          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          SHA_MACOS_ARM64: ${{ needs.release.outputs.sha_macos_arm64 }}
+          SHA_MACOS_X64: ${{ needs.release.outputs.sha_macos_x64 }}
+          SHA_LINUX_X64: ${{ needs.release.outputs.sha_linux_x64 }}
+          SHA_LINUX_ARM64: ${{ needs.release.outputs.sha_linux_arm64 }}
+        run: |
+          gh api repos/sanitai/homebrew-sanitai/dispatches \
+            --field event_type=new-release \
+            --field "client_payload[version]=${RELEASE_VERSION}" \
+            --field "client_payload[sha256_macos_arm64]=${SHA_MACOS_ARM64}" \
+            --field "client_payload[sha256_macos_x64]=${SHA_MACOS_X64}" \
+            --field "client_payload[sha256_linux_x64]=${SHA_LINUX_X64}" \
+            --field "client_payload[sha256_linux_arm64]=${SHA_LINUX_ARM64}"
