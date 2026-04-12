@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.2 (2026-04-12)
+
+### Bug Fixes
+
+- Move landing page to docs/ for GitHub Pages
+  ([`b2b0581`](https://github.com/thepixelabs/sanitai/commit/b2b058175f5f6e6cd9e754a23eb1e57792aab05a))
+
+
 ## v0.1.1 (2026-04-12)
 
 ### Bug Fixes
