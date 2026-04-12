@@ -24,7 +24,7 @@ SanitAI finds them. In seconds.
 **Homebrew (macOS and Linux)**
 
 ```sh
-brew install sanitai/tap/sanitai
+brew install thepixelabs/tap/sanitai
 ```
 
 **curl installer (Linux and macOS)**

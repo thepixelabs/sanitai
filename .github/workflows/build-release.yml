@@ -342,25 +342,101 @@ jobs:
             sbom.cyclonedx.json \
             --clobber
 
-  dispatch-tap:
-    name: Trigger Homebrew tap update
+  bump-tap:
+    name: Open version-bump PR against homebrew-tap
     needs: release
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - name: Dispatch new-release event to homebrew-sanitai
+      - name: Generate tap bot installation token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: thepixelabs
+          repositories: homebrew-tap
+
+      - name: Clone homebrew-tap
         env:
-          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
-          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          TAG: v${{ needs.release.outputs.version }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/thepixelabs/homebrew-tap.git" tap
+          cd tap
+          git config user.name "thepixelabs-homebrew-bot[bot]"
+          git config user.email "thepixelabs-homebrew-bot[bot]@users.noreply.github.com"
+          git checkout -b "bump/sanitai-${TAG}"
+
+      - name: Update Formula/sanitai.rb
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
           SHA_MACOS_ARM64: ${{ needs.release.outputs.sha_macos_arm64 }}
           SHA_MACOS_X64: ${{ needs.release.outputs.sha_macos_x64 }}
           SHA_LINUX_X64: ${{ needs.release.outputs.sha_linux_x64 }}
           SHA_LINUX_ARM64: ${{ needs.release.outputs.sha_linux_arm64 }}
         run: |
-          gh api repos/thepixelabs/homebrew-sanitai/dispatches \
-            --field event_type=new-release \
-            --field "client_payload[version]=${RELEASE_VERSION}" \
-            --field "client_payload[sha256_macos_arm64]=${SHA_MACOS_ARM64}" \
-            --field "client_payload[sha256_macos_x64]=${SHA_MACOS_X64}" \
-            --field "client_payload[sha256_linux_x64]=${SHA_LINUX_X64}" \
-            --field "client_payload[sha256_linux_arm64]=${SHA_LINUX_ARM64}"
+          cd tap
+          FILE="Formula/sanitai.rb"
+          # Update version
+          sed -i -E "s|^(  version )\".*\"|\\1\"${VERSION}\"|" "$FILE"
+          # Update URLs (version embedded in URL)
+          OLD_VERSION=$(grep -oP 'sanitai-\K[0-9]+\.[0-9]+\.[0-9]+' "$FILE" | head -1)
+          sed -i "s|sanitai-${OLD_VERSION}-|sanitai-${VERSION}-|g" "$FILE"
+          # Update sha256 values by target order (macos arm64, macos x64, linux arm64, linux x64)
+          python3 - <<'PYEOF'
+          import re, os
+          file = "Formula/sanitai.rb"
+          content = open(file).read()
+          shas = {
+            "aarch64-apple-darwin":      os.environ["SHA_MACOS_ARM64"],
+            "x86_64-apple-darwin":       os.environ["SHA_MACOS_X64"],
+            "aarch64-unknown-linux-gnu": os.environ["SHA_LINUX_ARM64"],
+            "x86_64-unknown-linux-gnu":  os.environ["SHA_LINUX_X64"],
+          }
+          for target, sha in shas.items():
+            # Find the url line for this target and replace the sha256 on the next line
+            content = re.sub(
+              r'(url "[^"]*' + re.escape(target) + r'[^"]*"\n\s*sha256 )"[^"]*"',
+              r'\g<1>"' + sha + '"',
+              content
+            )
+          open(file, "w").write(content)
+          print("Updated Formula/sanitai.rb")
+          PYEOF
+
+      - name: Commit and push
+        env:
+          TAG: v${{ needs.release.outputs.version }}
+        run: |
+          cd tap
+          git add Formula/sanitai.rb
+          git commit -m "bump: sanitai ${TAG}"
+          git push origin "bump/sanitai-${TAG}"
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          TAG: v${{ needs.release.outputs.version }}
+          VERSION: ${{ needs.release.outputs.version }}
+          SHA_MACOS_ARM64: ${{ needs.release.outputs.sha_macos_arm64 }}
+          SHA_MACOS_X64: ${{ needs.release.outputs.sha_macos_x64 }}
+          SHA_LINUX_X64: ${{ needs.release.outputs.sha_linux_x64 }}
+          SHA_LINUX_ARM64: ${{ needs.release.outputs.sha_linux_arm64 }}
+        run: |
+          cd tap
+          gh pr create \
+            --repo thepixelabs/homebrew-tap \
+            --title "bump: sanitai ${TAG}" \
+            --body "Automated version bump from [thepixelabs/sanitai](https://github.com/thepixelabs/sanitai/releases/tag/${TAG}).
+
+          - **version:** ${VERSION}
+          - **sha256 macOS arm64:** \`${SHA_MACOS_ARM64}\`
+          - **sha256 macOS x64:** \`${SHA_MACOS_X64}\`
+          - **sha256 Linux x64:** \`${SHA_LINUX_X64}\`
+          - **sha256 Linux arm64:** \`${SHA_LINUX_ARM64}\`
+
+          Auto-merges if CI passes and diff is version/sha256/url only." \
+            --label version-bump \
+            --head "bump/sanitai-${TAG}" \
+            --base main
