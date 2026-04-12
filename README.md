@@ -1,6 +1,6 @@
-# SanitAI
+# [SanitAI](https://sanitai.pixelabs.net)
 
-<img src="docs/nix-float.svg" align="right" width="200" alt="Nix the Raccoon — SanitAI mascot"/>
+<a href="https://sanitai.pixelabs.net"><img src="docs/nix-float.svg" align="right" width="200" alt="Nix the Raccoon — SanitAI mascot"/></a>
 
 **Find secrets in your LLM chat history before someone else does.**
 
