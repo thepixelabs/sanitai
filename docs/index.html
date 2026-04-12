@@ -11,8 +11,8 @@
   </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SanitAI — Scan LLM Exports for Leaked API Keys &amp; Credentials</title>
-  <meta name="description" content="Free CLI tool that scans LLM conversation exports for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account required." />
+  <title>SanitAI — Scan LLM Conversation History for Leaked API Keys &amp; Credentials</title>
+  <meta name="description" content="Free CLI tool that scans your local LLM conversation history for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account required." />
   <meta name="theme-color" content="#0d0e14" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -21,21 +21,21 @@
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="SanitAI — Your LLM conversation exports contain credentials." />
-  <meta property="og:description" content="Free CLI that scans LLM conversation exports for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account." />
+  <meta property="og:title" content="SanitAI — Your local LLM conversation history contains credentials." />
+  <meta property="og:description" content="Free CLI that scans your local LLM conversation history for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account." />
   <meta property="og:url" content="https://sanitai.dev/" />
   <meta property="og:image" content="https://sanitai.dev/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="SanitAI terminal scan output — detecting a leaked AWS access key in an LLM conversation export" />
+  <meta property="og:image:alt" content="SanitAI terminal scan output — detecting a leaked AWS access key in a local LLM conversation history file" />
   <meta property="og:site_name" content="SanitAI by Pixelabs" />
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="SanitAI — Your LLM conversation exports contain credentials." />
-  <meta name="twitter:description" content="Free CLI. Scans LLM conversation exports for leaked API keys and PII. 100% offline. No telemetry." />
+  <meta name="twitter:title" content="SanitAI — Your local LLM conversation history contains credentials." />
+  <meta name="twitter:description" content="Free CLI. Scans your local LLM conversation history for leaked API keys and PII. 100% offline. No telemetry." />
   <meta name="twitter:image" content="https://sanitai.dev/og-image.png" />
-  <meta name="twitter:image:alt" content="SanitAI terminal scan output detecting a leaked API key in an LLM conversation export" />
+  <meta name="twitter:image:alt" content="SanitAI terminal scan output detecting a leaked API key in a local LLM conversation history file" />
 
   <meta name="robots" content="index, follow" />
 
@@ -50,7 +50,7 @@
     "operatingSystem": "macOS, Linux",
     "softwareVersion": "0.1.0",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "description": "CLI tool that scans LLM conversation exports for leaked API keys, database credentials, and PII. Runs entirely locally with no telemetry.",
+    "description": "CLI tool that scans local LLM conversation history files for leaked API keys, database credentials, and PII. Runs entirely locally with no telemetry.",
     "url": "https://sanitai.dev/",
     "downloadUrl": "https://github.com/thepixelabs/sanitai/releases",
     "installUrl": "https://sanitai.dev/#install",
@@ -78,8 +78,8 @@
       },
       {
         "@type": "Question",
-        "name": "Which LLM export formats are supported?",
-        "acceptedAnswer": { "@type": "Answer", "text": "SanitAI currently supports Claude.ai exports (conversations.json ZIP) and OpenAI Chat exports (conversations.json ZIP). GitHub Copilot and Google Gemini support are planned." }
+        "name": "Which LLM conversation sources are supported?",
+        "acceptedAnswer": { "@type": "Answer", "text": "SanitAI auto-discovers Claude Code session files (~/.claude/projects/**/*.jsonl), Claude Desktop conversation JSON files, and Cursor workspace SQLite databases. You can also point it at any file or directory, or pipe content via stdin. No export or download required." }
       },
       {
         "@type": "Question",
@@ -1157,7 +1157,7 @@
           Your AI chat history<br />is a credential store.
         </h1>
         <p class="hero__sub">
-          SanitAI scans your LLM conversation exports for leaked API keys, database credentials, and PII. Entirely on your machine. Zero network calls. No account.
+          SanitAI scans your local LLM conversation history for leaked API keys, database credentials, and PII. Entirely on your machine. Zero network calls. No account.
         </p>
         <div class="trust-strip" role="list" aria-label="Key features">
           <span class="trust-pill" role="listitem">100% offline</span>
@@ -1200,7 +1200,7 @@
         <div class="nix-shadow-wrap">
           <img
             src="nix-hero.png"
-            alt="Nix the Raccoon — SanitAI's built-in scanner, actively finding secrets in your export"
+            alt="Nix the Raccoon — SanitAI's built-in scanner, actively finding secrets in your local conversation history"
             width="400"
             height="480"
             loading="eager"
@@ -1220,7 +1220,7 @@
   <div class="container">
     <p class="section__eyebrow">See it run</p>
     <h2 class="section__h2" id="demo-heading">One command. Every secret. Nothing sent.</h2>
-    <p class="section__lead">Meet Nix — SanitAI's built-in scanner. Reads every message in your export, flags every finding, touches no network.</p>
+    <p class="section__lead">Meet Nix — SanitAI's built-in scanner. Auto-discovers your local Claude Code, Claude Desktop, and Cursor session files, flags every finding, touches no network.</p>
 
     <div style="margin-top: 1.75rem; max-width: 800px;">
       <div class="terminal" role="region" aria-label="SanitAI terminal demo output">
@@ -1231,26 +1231,22 @@
           <span class="terminal__label">bash</span>
         </div>
         <div class="terminal__body">
-          <span class="t-prompt">$ </span><span class="t-cmd">sanitai scan ~/Downloads/export.zip</span><br />
+          <span class="t-prompt">$ </span><span class="t-cmd">sanitai scan</span><br />
           <span class="t-blank"></span>
           <span class="t-meta">SanitAI v0.1.0 — local scan, no network</span><br />
-          <span class="t-meta">Parsing: export.zip  ·  1,842 messages  ·  94 conversations</span><br />
+          <span class="t-meta">Auto-discovered: 3 files  ·  1,842 turns  ·  ~/.claude/projects/</span><br />
           <span class="t-blank"></span>
           <span class="t-label">FINDINGS (4)</span><br />
           <span class="t-divider">─────────────────────────────────────────────────────────────</span><br />
-          <span class="t-high"> HIGH</span><span class="t-label">  AWS Access Key        </span><span class="t-dim">conversation_47.json:312</span><br />
-          <span class="t-dim">       AKIA[REDACTED]        aws_access_key_id pattern</span><br />
+          <span class="t-high">[HIGH  ]</span><span class="t-dim"> ~/.claude/projects/myproject/session.jsonl  turn=47  aws_access_key_id  bytes=312..332</span><br />
           <span class="t-blank"></span>
-          <span class="t-high"> HIGH</span><span class="t-label">  Generic API Key       </span><span class="t-dim">conversation_12.json:88</span><br />
-          <span class="t-dim">       sk-[REDACTED]         high-entropy bearer token</span><br />
+          <span class="t-high">[HIGH  ]</span><span class="t-dim"> ~/.claude/projects/apiwork/chat.jsonl  turn=12  generic_api_key  bytes=88..110</span><br />
           <span class="t-blank"></span>
-          <span class="t-med">  MED</span><span class="t-label">  Email address         </span><span class="t-dim">conversation_91.json:201</span><br />
-          <span class="t-dim">       j****@example.com     RFC 5322 heuristic</span><br />
+          <span class="t-med">[MEDIUM]</span><span class="t-dim"> ~/.claude/projects/work/session.jsonl  turn=91  email_address  bytes=201..220</span><br />
           <span class="t-blank"></span>
-          <span class="t-low">  LOW</span><span class="t-label">  Internal hostname     </span><span class="t-dim">conversation_03.json:44</span><br />
-          <span class="t-dim">       db.internal.corp      internal TLD heuristic</span><br />
+          <span class="t-low">[LOW   ]</span><span class="t-dim"> ~/.claude/projects/infra/debug.jsonl  turn=3  internal_hostname  bytes=44..60</span><br />
           <span class="t-divider">─────────────────────────────────────────────────────────────</span><br />
-          <span class="t-meta">4 findings  ·  1,842 messages  ·  0.8s  ·  zero network calls</span><br />
+          <span class="t-meta">4 findings  ·  1,842 turns  ·  0.8s  ·  zero network calls</span><br />
           <span class="t-blank"></span>
           <span class="t-meta">Run `sanitai redact` to write a clean copy.</span>
         </div>
@@ -1288,14 +1284,14 @@
     <div class="steps" role="list">
       <div class="step" role="listitem">
         <span class="step__num" aria-hidden="true">01</span>
-        <p class="step__title">Export</p>
-        <p class="step__body">Download your conversation history from your AI tool. You probably have a ZIP in Downloads right now.</p>
+        <p class="step__title">Install</p>
+        <p class="step__body">Install via Homebrew, cargo, or the install script. SanitAI runs entirely on your machine — no account, no sign-up, no network calls at runtime.</p>
       </div>
       <div class="step-arrow" aria-hidden="true">→</div>
       <div class="step" role="listitem">
         <span class="step__num" aria-hidden="true">02</span>
         <p class="step__title">Scan</p>
-        <p class="step__body"><code>sanitai scan export.zip</code> reads every message, runs every detector, and surfaces findings with file, line, and severity. Nothing is modified.</p>
+        <p class="step__body"><code>sanitai scan</code> auto-discovers Claude Code, Claude Desktop, and Cursor session files on your machine, runs every detector, and surfaces findings with file, turn, and severity. Nothing is modified.</p>
       </div>
       <div class="step-arrow" aria-hidden="true">→</div>
       <div class="step" role="listitem">
@@ -1426,23 +1422,28 @@
           </thead>
           <tbody>
             <tr>
-              <td>Claude.ai</td>
-              <td>conversations.json ZIP</td>
+              <td>Claude Code</td>
+              <td>JSONL session files (<code>~/.claude/projects/</code>)</td>
               <td><span class="status--supported">Supported</span></td>
             </tr>
             <tr>
-              <td>OpenAI Chat</td>
-              <td>conversations.json ZIP</td>
+              <td>Claude Desktop</td>
+              <td>JSON conversation files (auto-discovered)</td>
+              <td><span class="status--supported">Supported</span></td>
+            </tr>
+            <tr>
+              <td>Cursor</td>
+              <td>SQLite workspace storage (<code>.vscdb</code>)</td>
               <td><span class="status--supported">Supported</span></td>
             </tr>
             <tr>
               <td>GitHub Copilot</td>
-              <td>Chat history export</td>
+              <td>Chat history</td>
               <td><span class="status--planned">Planned</span></td>
             </tr>
             <tr>
               <td>Google Gemini</td>
-              <td>Conversation export</td>
+              <td>Conversation history</td>
               <td><span class="status--planned">Planned</span></td>
             </tr>
           </tbody>
@@ -1652,10 +1653,10 @@
 
       <details class="faq-item" role="listitem">
         <summary>
-          Which LLM export formats are supported?
+          Which LLM conversation sources are supported?
           <span class="faq-arrow" aria-hidden="true">▶</span>
         </summary>
-        <p class="faq-item__body">SanitAI currently supports Claude.ai exports (conversations.json ZIP) and OpenAI Chat exports (conversations.json ZIP). GitHub Copilot and Google Gemini support are planned for an upcoming release.</p>
+        <p class="faq-item__body">SanitAI auto-discovers Claude Code session files (<code>~/.claude/projects/**/*.jsonl</code>), Claude Desktop conversation JSON files, and Cursor workspace SQLite databases. You can also pass any file or directory explicitly (<code>sanitai scan &lt;path&gt;</code>), or pipe content in via stdin. No export or download step required. GitHub Copilot and Google Gemini support are planned.</p>
       </details>
 
       <details class="faq-item" role="listitem">
