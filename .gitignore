@@ -67,7 +67,7 @@ cosign.key
 *.gif
 *.webp
 # Landing page assets — tracked intentionally
-!index.html
-!nix-hero.png
-!nix-stories.png
-!nix-cta.png
+!docs/index.html
+!docs/nix-hero.png
+!docs/nix-stories.png
+!docs/nix-cta.png
