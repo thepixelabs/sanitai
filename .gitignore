@@ -7,7 +7,7 @@
 *.swp
 *.swo
 *~
-.DS_Store
+**/.DS_Store
 
 # Compiled binary at repo root (convenience copy)
 /sanitai
@@ -17,5 +17,53 @@
 .env.*
 !.env.example
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code artifacts (settings, memory, worktree metadata)
+.claude/
+# Multi-agent blackboard
+.tasks/
+# Aider
+.aider*
+
+# Rust tooling outputs
+**/*.rs.bk
+**/*.orig
+cargo-timing*.html
+**/*.pdb
+**/*.profraw
+**/*.profdata
+
+# Release artifacts (built locally or by CI, never source-tracked)
+dist/
+*.tar.gz
+*.zip
+*.dmg
+*.pkg
+*.msi
+*.AppImage
+*.deb
+*.rpm
+
+# Cargo credentials (distinct from config.toml which is intentionally tracked)
+.cargo/credentials
+.cargo/credentials.toml
+
+# Scratch / personal notes not belonging to this project
+vedox/
+landing.html
+generate_nix.py
+
+# Cryptographic key material and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+cosign.key
+
+# Loose image files (design/marketing assets belong in a dedicated assets repo or LFS)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
