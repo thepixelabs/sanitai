@@ -1,0 +1,15 @@
+[package]
+name    = "context-eval"
+version.workspace = true
+edition = "2021"
+
+[[bin]]
+name = "context-eval"
+path = "src/main.rs"
+
+[dependencies]
+sanitai-core      = { path = "../../crates/sanitai-core" }
+sanitai-detectors = { path = "../../crates/sanitai-detectors" }
+serde             = { workspace = true }
+serde_json        = { workspace = true }
+anyhow            = { workspace = true }
