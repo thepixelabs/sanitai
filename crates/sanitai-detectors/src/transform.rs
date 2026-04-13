@@ -27,7 +27,6 @@ use sanitai_core::{
     finding::{Finding, Transform, TransformChain},
     traits::{Category, Detector},
 };
-use std::collections::HashSet;
 use std::hash::Hasher;
 use std::io::Read;
 use std::sync::{Arc, OnceLock};
@@ -196,32 +195,35 @@ struct CascadeCtx<'a> {
     inner: &'a RegexDetector,
     config: &'a TransformConfig,
     turn_id: &'a sanitai_core::turn::TurnId,
+    /// Role is unknown inside the transform cascade (we operate on decoded
+    /// payloads, not original turns) — always `None`.
+    role: Option<sanitai_core::turn::Role>,
     out: &'a mut Vec<Finding>,
-    seen: HashSet<u64>,
-    decoded_total: usize,
+    scratch: &'a mut DetectorScratch,
 }
 
 impl<'a> CascadeCtx<'a> {
     fn note(&mut self, bytes: &[u8]) -> bool {
         let h = hash64(bytes);
-        if !self.seen.insert(h) {
+        if !self.scratch.decode_seen.insert(h) {
             return false;
         }
-        if self.decoded_total + bytes.len() > self.config.max_decode_bytes {
+        if self.scratch.decode_bytes_used + bytes.len() > self.config.max_decode_bytes {
             tracing::warn!(
-                used = self.decoded_total,
+                used = self.scratch.decode_bytes_used,
                 limit = self.config.max_decode_bytes,
                 "transform decode budget exhausted for chunk"
             );
             return false;
         }
-        self.decoded_total += bytes.len();
+        self.scratch.decode_bytes_used += bytes.len();
         true
     }
 
     fn rescan(&mut self, decoded: &[u8], chain: &TransformChain, depth: u8) {
         if let Ok(s) = std::str::from_utf8(decoded) {
-            self.inner.scan_str(s, self.turn_id, 0, chain, self.out);
+            self.inner
+                .scan_str(s, self.turn_id, self.role.clone(), 0, chain, self.out);
             if depth < self.config.max_depth {
                 self.cascade(s, chain, depth + 1);
             }
@@ -316,13 +318,15 @@ impl Detector for TransformDetector {
             Err(_) => return,
         };
 
+        // Reset the decode budget and cycle-detection set for this chunk.
+        scratch.reset_for_chunk();
         let mut ctx = CascadeCtx {
             inner: &self.inner,
             config: &self.config,
             turn_id: &chunk.turn_id,
+            role: None,
             out,
-            seen: HashSet::new(),
-            decoded_total: 0,
+            scratch,
         };
         let base_chain = TransformChain::default();
         ctx.cascade(hay, &base_chain, 1);

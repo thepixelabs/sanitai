@@ -13,6 +13,10 @@ sanitai-detectors = { path = "../sanitai-detectors" }
 sanitai-parsers   = { path = "../sanitai-parsers" }
 sanitai-redactor  = { path = "../sanitai-redactor" }
 sanitai-sandbox   = { path = "../sanitai-sandbox" }
+sanitai-store     = { path = "../sanitai-store" }
+sanitai-tui       = { path = "../sanitai-tui" }
+atty              = { workspace = true }
+ulid              = { workspace = true }
 clap              = { workspace = true }
 anyhow            = { workspace = true }
 tracing           = { workspace = true }

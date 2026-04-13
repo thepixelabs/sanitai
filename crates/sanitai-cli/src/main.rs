@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -33,7 +34,10 @@ use sanitai_detectors::{
 use sanitai_parsers::{discover_all, ChatGptParser, ClaudeJsonlParser};
 use sanitai_redactor::Redactor;
 use sanitai_sandbox::create_sandbox;
+use sanitai_store::{FindingRecord, ScanRecord, Store};
+use sanitai_tui;
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 
 // ---------------------------------------------------------------------------
 // Arg types
@@ -69,7 +73,12 @@ enum Commands {
     Redact(RedactArgs),
     /// Self-test: verify sandbox is active and detectors can find a synthetic secret
     Verify(VerifyArgs),
+    /// Launch the interactive TUI (requires a terminal)
+    Tui(TuiArgs),
 }
+
+#[derive(clap::Args)]
+struct TuiArgs {}
 
 #[derive(clap::Args)]
 struct ScanArgs {
@@ -226,6 +235,7 @@ fn main() {
         Commands::Scan(args) => run_scan(args, cfg_path.as_deref()),
         Commands::Redact(args) => run_redact(args, cfg_path.as_deref()),
         Commands::Verify(args) => run_verify(args),
+        Commands::Tui(_args) => run_tui(),
     };
     std::process::exit(exit_code);
 }
@@ -267,6 +277,14 @@ fn threshold_to_filter(t: f32) -> ConfidenceFilter {
 // ---------------------------------------------------------------------------
 
 fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
+    // Capture timing and generate a unique scan ID before any work begins.
+    let scan_id = Ulid::new().to_string();
+    let scan_start = Instant::now();
+    let started_at_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos() as i64;
+
     // Load config first — an explicit --config failure is fatal.
     let cfg = match load_cli_config(config_path) {
         Ok(c) => c,
@@ -331,6 +349,8 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
 
     let chunker_cfg = ChunkerConfig::default();
     let mut all_findings: Vec<Finding> = Vec::new();
+    let mut total_turns: usize = 0;
+    let mut scanned_file_paths: Vec<String> = Vec::new();
 
     // Cross-turn correlator: one instance shared across all files so that a
     // secret split across the end of one file and the start of the next is
@@ -344,6 +364,7 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
     // sandbox boundary as "no new input sources after this point".
     let mut stdin_findings: Vec<Finding> = Vec::new();
     for _ in &stdin_paths {
+        scanned_file_paths.push("<stdin>".to_owned());
         match scan_stdin(&detectors, &chunker_cfg, &mut correlator) {
             Ok(findings) => stdin_findings.extend(findings),
             Err(e) => tracing::warn!("stdin scan error: {e}"),
@@ -367,8 +388,10 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
     }
 
     for path in &file_paths {
+        scanned_file_paths.push(path.to_string_lossy().into_owned());
         match scan_path(path, &detectors, &chunker_cfg, Some(&mut correlator)) {
-            Ok(findings) => {
+            Ok((findings, turns)) => {
+                total_turns += turns;
                 for f in findings {
                     if f.is_synthetic() && !args.include_synthetic {
                         continue;
@@ -402,6 +425,90 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         }
     }
 
+    // ── history store write (non-fatal) ─────────────────────────────────────
+    let elapsed_ms = scan_start.elapsed().as_millis() as i64;
+    let project_name = infer_project_name(&file_paths);
+    let claude_account = infer_claude_account(&file_paths);
+
+    let scan_record = ScanRecord {
+        scan_id: scan_id.clone(),
+        started_at_ns,
+        duration_ms: elapsed_ms,
+        project_name,
+        claude_account,
+        total_files: scanned_file_paths.len() as i64,
+        total_turns: total_turns as i64,
+        format: match args.format {
+            OutputFormat::Human => "human",
+            OutputFormat::Json => "json",
+            OutputFormat::Sarif => "sarif",
+        }
+        .to_owned(),
+        exit_code: if has_findings && !args.exit_zero { 1 } else { 0 },
+        findings_high: all_findings
+            .iter()
+            .filter(|f| matches!(f.confidence, Confidence::High))
+            .count() as i64,
+        findings_medium: all_findings
+            .iter()
+            .filter(|f| matches!(f.confidence, Confidence::Medium))
+            .count() as i64,
+        findings_low: all_findings
+            .iter()
+            .filter(|f| matches!(f.confidence, Confidence::Low))
+            .count() as i64,
+    };
+
+    let finding_records: Vec<FindingRecord> = all_findings
+        .iter()
+        .map(|f| FindingRecord {
+            scan_id: scan_id.clone(),
+            detector_id: f.detector_id.to_owned(),
+            file_path: f.turn_id.0.to_string_lossy().into_owned(),
+            turn_idx: f.turn_id.1 as i64,
+            confidence: match f.confidence {
+                Confidence::High => "high",
+                Confidence::Medium => "medium",
+                Confidence::Low => "low",
+            }
+            .to_owned(),
+            transforms: {
+                let names: Vec<&str> = f
+                    .transform
+                    .0
+                    .iter()
+                    .map(|t| match t {
+                        Transform::Base64 => "base64",
+                        Transform::Hex => "hex",
+                        Transform::UrlEncoded => "url",
+                        Transform::Gzip => "gzip",
+                        Transform::HtmlEntity => "html",
+                    })
+                    .collect();
+                serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned())
+            },
+            synthetic: f.synthetic,
+            role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
+            category: Some(format!("{:?}", f.category).to_lowercase()),
+            entropy_score: Some(f.entropy_score),
+            context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
+            // secret_hash is computed by the store layer with the installation
+            // key in a later phase; None for now.
+            secret_hash: None,
+        })
+        .collect();
+
+    match Store::open() {
+        Ok(store) => {
+            if let Err(e) = store.record_scan(&scan_record, &scanned_file_paths, &finding_records)
+            {
+                tracing::warn!("history store write failed: {e}");
+            }
+        }
+        Err(e) => tracing::warn!("history store open failed: {e}"),
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     if has_findings && !args.exit_zero {
         1
     } else {
@@ -414,7 +521,7 @@ fn scan_path(
     detectors: &[Box<dyn sanitai_core::traits::Detector>],
     chunker_cfg: &ChunkerConfig,
     mut correlator: Option<&mut CrossTurnCorrelator>,
-) -> Result<Vec<Finding>> {
+) -> Result<(Vec<Finding>, usize)> {
     // Read head bytes for parser sniffing (up to 4 KB)
     let mut head_buf = [0u8; 4096];
     let head_len = {
@@ -434,7 +541,7 @@ fn scan_path(
 
     if claude_score == 0 && chatgpt_score == 0 {
         tracing::debug!(path = %path.display(), "no parser recognises this file; skipping");
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
 
     // Open source for streaming
@@ -453,6 +560,7 @@ fn scan_path(
 
     let mut findings: Vec<Finding> = Vec::new();
     let mut scratch = DetectorScratch::default();
+    let mut turn_count: usize = 0;
 
     for turn_result in turns {
         let turn = match turn_result {
@@ -462,10 +570,20 @@ fn scan_path(
                 continue;
             }
         };
+        turn_count += 1;
 
+        let pre_turn_len = findings.len();
         for chunk in chunk_turn(&turn, chunker_cfg) {
             for det in detectors {
                 det.scan(&chunk, &mut scratch, &mut findings);
+            }
+        }
+        // Backfill the turn role onto findings produced by this turn's chunks.
+        // `Detector::scan` operates on a `Chunk` which does not carry role
+        // metadata, so per-chunk findings come back with `role: None`.
+        for f in &mut findings[pre_turn_len..] {
+            if f.role.is_none() {
+                f.role = Some(turn.role.clone());
             }
         }
 
@@ -478,7 +596,7 @@ fn scan_path(
         }
     }
 
-    Ok(findings)
+    Ok((findings, turn_count))
 }
 
 fn scan_stdin(
@@ -553,6 +671,44 @@ fn expand_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Walk up from each scanned path to find a `.git` directory.
+/// Returns the name of the git root directory, or None.
+fn infer_project_name(paths: &[PathBuf]) -> Option<String> {
+    for path in paths {
+        let mut current = path.as_path();
+        loop {
+            if current.join(".git").exists() {
+                return current
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_owned());
+            }
+            match current.parent() {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+    }
+    None
+}
+
+/// Extract Claude project name from a path matching `.claude/projects/<name>/`.
+/// Returns None if no such path pattern exists.
+fn infer_claude_account(paths: &[PathBuf]) -> Option<String> {
+    for path in paths {
+        let s = path.to_string_lossy();
+        // Match: .claude/projects/<project-name>/...
+        if let Some(idx) = s.find(".claude/projects/") {
+            let after = &s[idx + ".claude/projects/".len()..];
+            let name = after.split('/').next().filter(|n| !n.is_empty());
+            if let Some(n) = name {
+                return Some(n.to_owned());
+            }
+        }
+    }
+    None
 }
 
 fn print_human(findings: &[Finding]) {
@@ -744,6 +900,10 @@ fn do_redact(args: RedactArgs) -> Result<()> {
                 confidence: Confidence::High,
                 span_kind: SpanKind::Single,
                 synthetic: jf.synthetic,
+                role: None,
+                category: sanitai_core::Category::Secret,
+                entropy_score: 0.0,
+                context_class: sanitai_core::ContextClass::Unclassified,
             })
         })
         .collect();
@@ -759,6 +919,26 @@ fn do_redact(args: RedactArgs) -> Result<()> {
     let redacted = redactor.redact(&content, &findings);
     print!("{redacted}");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// tui
+// ---------------------------------------------------------------------------
+
+fn run_tui() -> i32 {
+    // Verify we are actually on a TTY before launching the TUI.
+    // If stdout is piped, ratatui will produce garbage output.
+    if !atty::is(atty::Stream::Stdout) || !atty::is(atty::Stream::Stdin) {
+        eprintln!("sanitai: the TUI requires an interactive terminal. Use `sanitai scan` for non-interactive use.");
+        return 2;
+    }
+    match sanitai_tui::run() {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("sanitai tui: {e}");
+            2
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

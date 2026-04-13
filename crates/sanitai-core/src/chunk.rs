@@ -67,11 +67,31 @@ pub struct DetectorScratch {
     pub decode_buf: Vec<u8>,
     /// Running tally of decode bytes used this chunk (budget control).
     pub decode_bytes_used: usize,
+    /// Cycle-detection set of 64-bit hashes of decoded blobs already processed
+    /// in this chunk. Prevents the transform cascade from looping on fixed
+    /// points (e.g. valid base64 that decodes to itself).
+    pub decode_seen: std::collections::HashSet<u64>,
 }
 
 impl DetectorScratch {
     pub fn reset_for_chunk(&mut self) {
         self.decode_buf.clear();
         self.decode_bytes_used = 0;
+        self.decode_seen.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_seen_cleared_on_reset() {
+        let mut s = DetectorScratch::default();
+        s.decode_seen.insert(42);
+        s.decode_bytes_used = 100;
+        s.reset_for_chunk();
+        assert!(s.decode_seen.is_empty());
+        assert_eq!(s.decode_bytes_used, 0);
     }
 }
