@@ -12,7 +12,8 @@ use std::ops::Range;
 // ---------------------------------------------------------------------------
 
 /// Category of content a detector can produce.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Category {
     Secret,
     Credential,

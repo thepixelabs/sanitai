@@ -121,8 +121,14 @@ impl CrossTurnCorrelator {
             let empty_chain = TransformChain::default();
             // We scan under the NEW turn's id — findings are attributed to
             // the turn that completed the secret.
-            self.detector
-                .scan_str(&reassembled, &turn.id, 0, &empty_chain, &mut scan_out);
+            self.detector.scan_str(
+                &reassembled,
+                &turn.id,
+                Some(turn.role.clone()),
+                0,
+                &empty_chain,
+                &mut scan_out,
+            );
 
             for mut f in scan_out {
                 let start = f.byte_range.start;
@@ -132,6 +138,9 @@ impl CrossTurnCorrelator {
                     f.span_kind = SpanKind::CrossTurn {
                         contributing_turns: vec![prior.turn_index, turn.id.1],
                     };
+                    // Cross-turn findings are attributed to the turn that
+                    // completed the secret, so its role applies.
+                    f.role = Some(turn.role.clone());
                     out.push(f);
                 }
             }
