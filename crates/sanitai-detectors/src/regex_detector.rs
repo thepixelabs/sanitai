@@ -1265,7 +1265,8 @@ mod tests {
     #[test]
     fn huggingface_token_detected() {
         let det = RegexDetector::new();
-        let input = "HF_TOKEN=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLm";
+        // Pattern requires exactly 37 alphanumeric chars after "hf_"
+        let input = "HF_TOKEN=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJk";
         let chunk = Chunk {
             bytes: input.as_bytes(),
             offset_map: OffsetMap::new_linear(0),

@@ -432,6 +432,11 @@ fn write_scan_to_store(summary: &ScanSummary) {
             )
             .unwrap_or_else(|_| "[]".to_owned()),
             synthetic: f.synthetic,
+            role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
+            category: Some(format!("{:?}", f.category).to_lowercase()),
+            entropy_score: Some(f.entropy_score),
+            context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
+            secret_hash: None,
         })
         .collect();
 
