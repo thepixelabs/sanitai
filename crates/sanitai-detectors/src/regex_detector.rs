@@ -17,6 +17,8 @@
 //!   (we use `std::sync::OnceLock`) so scanning is allocation-free on the
 //!   hot path aside from the per-finding `String`.
 
+use crate::keyword_filter::KeywordFilter;
+use crate::stopwords;
 use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use sanitai_core::{
@@ -131,6 +133,11 @@ struct Rule {
     base_confidence: Confidence,
     matcher: Matcher,
     validate: Option<fn(&str) -> Option<Confidence>>,
+    /// Keywords for Aho-Corasick pre-filter. None = no keyword gate (always scan).
+    /// At least one keyword must appear in the haystack for this rule to fire.
+    keywords: Option<&'static [&'static str]>,
+    /// Apply conversation-aware stopword suppression to this rule's matches.
+    use_stopwords: bool,
 }
 
 /// We use both `regex` (fast, no backrefs) and `fancy_regex` (lookaround) as
@@ -248,6 +255,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bAKIA[0-9A-Z]{16}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "aws_sts_access_key_id",
@@ -255,6 +264,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bASIA[0-9A-Z]{16}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // AWS secret: 40-char base64-ish. Only emit if entropy is high AND
         // it is near an `aws` context. We capture the value of the assignment.
@@ -270,6 +281,8 @@ fn build_rules() -> Vec<Rule> {
                 Matcher::PlainCap(re, idx)
             },
             validate: Some(entropy_gate_4_0),
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- GitHub ----------------
         Rule {
@@ -278,6 +291,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bghp_[A-Za-z0-9]{36}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "github_pat_fine_grained",
@@ -285,6 +300,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bgithub_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "github_server_token",
@@ -292,6 +309,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bghs_[A-Za-z0-9]{36}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "github_oauth_token",
@@ -299,6 +318,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bgho_[A-Za-z0-9]{36}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "github_refresh_token",
@@ -306,6 +327,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bghr_[A-Za-z0-9]{36}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- OpenAI / Anthropic ----------------
         Rule {
@@ -314,6 +337,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bsk-[A-Za-z0-9]{48}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "openai_project_key",
@@ -321,6 +346,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bsk-proj-[A-Za-z0-9\-_]{100,150}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "anthropic_api_key",
@@ -328,6 +355,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bsk-ant-(?:api03-)?[A-Za-z0-9\-_]{93,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Stripe ----------------
         Rule {
@@ -336,6 +365,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bsk_live_[A-Za-z0-9]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "stripe_test_secret_key",
@@ -343,6 +374,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::Medium,
             matcher: Matcher::Plain(plain(r"\bsk_test_[A-Za-z0-9]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "stripe_restricted_key",
@@ -350,6 +383,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\brk_live_[A-Za-z0-9]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "stripe_webhook_secret",
@@ -357,6 +392,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bwhsec_[A-Za-z0-9]{32,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Slack ----------------
         Rule {
@@ -365,6 +402,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bxox[baprs]-[0-9]{9,13}-[A-Za-z0-9-]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- JWT ----------------
         Rule {
@@ -375,6 +414,8 @@ fn build_rules() -> Vec<Rule> {
                 r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
             )),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Private key PEM ----------------
         Rule {
@@ -385,6 +426,8 @@ fn build_rules() -> Vec<Rule> {
                 r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----",
             )),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Database URLs ----------------
         Rule {
@@ -393,6 +436,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"postgres(?:ql)?://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "mysql_url",
@@ -400,6 +445,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"mysql://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "mongodb_srv_url",
@@ -407,6 +454,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"mongodb(?:\+srv)?://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "redis_url",
@@ -414,6 +463,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"redis(?:s)?://(?:[^\s:@/]+:)?[^\s@/]+@[^\s/]+")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Credit cards (Luhn validated) ----------------
         Rule {
@@ -422,6 +473,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\b4[0-9]{12}(?:[0-9]{3})?\b")),
             validate: Some(luhn_gate),
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "credit_card_mastercard",
@@ -431,6 +484,8 @@ fn build_rules() -> Vec<Rule> {
                 r"\b(?:5[1-5][0-9]{14}|2(?:2[2-9][0-9]{12}|[3-6][0-9]{13}|7[01][0-9]{12}|720[0-9]{12}))\b",
             )),
             validate: Some(luhn_gate),
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "credit_card_amex",
@@ -438,6 +493,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\b3[47][0-9]{13}\b")),
             validate: Some(luhn_gate),
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- IBAN (mod-97 validated) ----------------
         Rule {
@@ -446,6 +503,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\b")),
             validate: Some(iban_gate),
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- GCP ----------------
         Rule {
@@ -454,6 +513,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "gcp_service_account_private_key_id",
@@ -461,6 +522,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r#""private_key_id"\s*:\s*"[0-9a-f]{40}""#)),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Azure ----------------
         Rule {
@@ -472,6 +535,8 @@ fn build_rules() -> Vec<Rule> {
                 Matcher::PlainCap(re, idx)
             },
             validate: Some(entropy_gate_4_0),
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "azure_sas_token",
@@ -481,6 +546,8 @@ fn build_rules() -> Vec<Rule> {
                 r"sv=\d{4}-\d{2}-\d{2}&[A-Za-z0-9%=&_\-]+sig=[A-Za-z0-9%]+",
             )),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Package registries ----------------
         Rule {
@@ -489,6 +556,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bnpm_[0-9A-Za-z]{36}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "pypi_token",
@@ -496,6 +565,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bpypi-[0-9A-Za-z\-_]{32,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "rubygems_token",
@@ -503,6 +574,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\brubygems_[0-9a-f]{48}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- HashiCorp Vault ----------------
         Rule {
@@ -511,6 +584,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bhvs\.[A-Za-z0-9_\-]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "vault_batch_token",
@@ -518,6 +593,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bhvb\.[A-Za-z0-9_\-]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "vault_recovery_token",
@@ -525,13 +602,17 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bhvr\.[A-Za-z0-9_\-]{24,}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "vault_legacy_token",
             category: Category::Credential,
             base_confidence: Confidence::Medium,
             matcher: Matcher::Plain(plain(r"\bs\.[0-9A-Za-z]{24,}\b")),
-            validate: None,
+            validate: Some(entropy_gate_4_0),
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Crypto ----------------
         Rule {
@@ -540,6 +621,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::Medium,
             matcher: Matcher::Plain(plain(r"\b1[0-9A-HJ-NP-Za-km-z]{25,34}\b")),
             validate: Some(entropy_gate_3_5),
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "ethereum_address",
@@ -547,6 +630,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::Medium,
             matcher: Matcher::Plain(plain(r"\b0x[0-9a-fA-F]{40}\b")),
             validate: None,
+            keywords: None,
+            use_stopwords: false,
         },
         Rule {
             id: "bitcoin_wif_private_key",
@@ -554,6 +639,8 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\b[5KL][0-9A-HJ-NP-Za-km-z]{50,51}\b")),
             validate: Some(entropy_gate_4_0),
+            keywords: None,
+            use_stopwords: false,
         },
         // ---------------- Generic assignment heuristic ----------------
         Rule {
@@ -567,6 +654,248 @@ fn build_rules() -> Vec<Rule> {
                 Matcher::Fancy(re)
             },
             validate: Some(generic_assign_gate),
+            keywords: None,
+            use_stopwords: false,
+        },
+        // --- Phase 1a: New provider rules ---
+
+        // source: gitleaks/rules/discord.toml
+        Rule {
+            id: "discord_bot_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\b[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}\b")),
+            validate: None,
+            keywords: Some(&["discord", "DISCORD", "bot_token", "BOT_TOKEN"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/telegram.toml
+        Rule {
+            id: "telegram_bot_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")),
+            validate: None,
+            keywords: Some(&["telegram", "TELEGRAM", "bot_token"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/sendgrid.toml
+        Rule {
+            id: "sendgrid_api_key",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b")),
+            validate: None,
+            keywords: Some(&["SG.", "sendgrid", "SENDGRID"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/mailgun.toml
+        Rule {
+            id: "mailgun_api_key",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bkey-[0-9a-z]{32}\b")),
+            validate: None,
+            keywords: Some(&["mailgun", "MAILGUN", "key-"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/twilio.toml
+        Rule {
+            id: "twilio_account_sid",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bAC[a-f0-9]{32}\b")),
+            validate: None,
+            keywords: Some(&["twilio", "TWILIO", "account_sid", "ACCOUNT_SID"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/linear.toml
+        Rule {
+            id: "linear_api_key",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\blin_api_[A-Za-z0-9]{40}\b")),
+            validate: None,
+            keywords: Some(&["lin_api_", "linear", "LINEAR_API"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/notion.toml
+        Rule {
+            id: "notion_integration_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bsecret_[A-Za-z0-9]{43}\b")),
+            validate: None,
+            keywords: Some(&["notion", "NOTION", "secret_"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/fly.toml
+        Rule {
+            id: "fly_io_api_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bFlyV1 [A-Za-z0-9+/=]{100,}\b")),
+            validate: None,
+            keywords: Some(&["FlyV1", "fly.io", "FLY_API"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/doppler.toml
+        Rule {
+            id: "doppler_service_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bdp\.st\.[a-z_]+\.[A-Za-z0-9]{40}\b")),
+            validate: None,
+            keywords: Some(&["dp.st.", "doppler", "DOPPLER"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/huggingface.toml
+        Rule {
+            id: "huggingface_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bhf_[A-Za-z0-9]{37}\b")),
+            validate: None,
+            keywords: Some(&["hf_", "huggingface", "HF_TOKEN", "HUGGINGFACE"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/replicate.toml
+        Rule {
+            id: "replicate_api_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\br8_[A-Za-z0-9]{40}\b")),
+            validate: None,
+            keywords: Some(&["r8_", "replicate", "REPLICATE"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/pagerduty.toml
+        Rule {
+            id: "pagerduty_api_key",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bu\+[A-Za-z0-9_-]{20}\b")),
+            validate: None,
+            keywords: Some(&["pagerduty", "PAGERDUTY", "pd_"]),
+            use_stopwords: false,
+        },
+        // source: gitleaks/rules/gitlab.toml — 13 variants
+        Rule {
+            id: "gitlab_pat",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglpat-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glpat-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_pipeline_trigger_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglptt-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glptt-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_runner_registration_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bGR1348941[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["GR1348941"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_deploy_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bgldt-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["gldt-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_feature_flag_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglft-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glft-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_runner_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglrt-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glrt-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_scim_oauth_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglsoat-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glsoat-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_ci_build_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglcbt-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glcbt-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_test_secret_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bgltst-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["gltst-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_incoming_mail_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglidt-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["glidt-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_oauth_app_secret",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bgloas-[A-Za-z0-9\-_]{64}\b")),
+            validate: None,
+            keywords: Some(&["gloas-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_agent_token",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bglagent-[A-Za-z0-9\-_]{50}\b")),
+            validate: None,
+            keywords: Some(&["glagent-"]),
+            use_stopwords: false,
+        },
+        Rule {
+            id: "gitlab_pat_uppercase",
+            category: Category::Credential,
+            base_confidence: Confidence::High,
+            matcher: Matcher::Plain(plain(r"\bGLPAT-[A-Za-z0-9\-_]{20}\b")),
+            validate: None,
+            keywords: Some(&["GLPAT-"]),
+            use_stopwords: false,
         },
     ]
 }
@@ -578,6 +907,7 @@ fn build_rules() -> Vec<Rule> {
 /// A `Detector` backed by the static rule table in this module.
 pub struct RegexDetector {
     rules: &'static [Rule],
+    keyword_filter: KeywordFilter,
 }
 
 fn rules() -> &'static [Rule] {
@@ -593,7 +923,14 @@ impl Default for RegexDetector {
 
 impl RegexDetector {
     pub fn new() -> Self {
-        Self { rules: rules() }
+        let r = rules();
+        let kw_pairs: Vec<(usize, Option<&'static [&'static str]>)> =
+            r.iter().enumerate().map(|(i, rule)| (i, rule.keywords)).collect();
+        let keyword_filter = KeywordFilter::build(&kw_pairs);
+        Self {
+            rules: r,
+            keyword_filter,
+        }
     }
 
     /// Scan a plain `&str` and append findings to `out`. Used by both the
@@ -602,14 +939,19 @@ impl RegexDetector {
         &self,
         hay: &str,
         turn_id: &sanitai_core::turn::TurnId,
+        role: Option<sanitai_core::turn::Role>,
         offset_base: usize,
         transform: &TransformChain,
         out: &mut Vec<Finding>,
     ) {
         // Reuse a scratch vec. Allocating here is fine — the transform path
         // calls us per decoded blob, not per chunk.
+        let kw_mask = self.keyword_filter.scan(hay);
         let mut matches: Vec<(usize, usize, &str)> = Vec::new();
-        for rule in self.rules {
+        for (rule_idx, rule) in self.rules.iter().enumerate() {
+            if !KeywordFilter::rule_fires(&kw_mask, rule_idx) {
+                continue; // keyword not present, skip regex entirely
+            }
             matches.clear();
             rule.matcher.find_iter(hay, &mut matches);
             for (start, end, raw) in matches.drain(..) {
@@ -620,6 +962,10 @@ impl RegexDetector {
                     },
                     None => rule.base_confidence.clone(),
                 };
+                // Stopword suppression (only for rules with use_stopwords: true)
+                if rule.use_stopwords && stopwords::is_stopword(raw) {
+                    continue;
+                }
                 out.push(Finding {
                     turn_id: turn_id.clone(),
                     detector_id: rule.id,
@@ -629,6 +975,10 @@ impl RegexDetector {
                     confidence,
                     span_kind: SpanKind::Single,
                     synthetic: raw.contains("SANITAI_FAKE"),
+                    role: role.clone(),
+                    category: rule.category,
+                    entropy_score: shannon_entropy(raw),
+                    context_class: sanitai_core::finding::ContextClass::Unclassified,
                 });
             }
             // Log count only — never raw value.
@@ -662,7 +1012,7 @@ impl Detector for RegexDetector {
             }
         };
         let empty = TransformChain::default();
-        self.scan_str(hay, &chunk.turn_id, 0, &empty, out);
+        self.scan_str(hay, &chunk.turn_id, None, 0, &empty, out);
     }
 }
 
@@ -799,5 +1149,132 @@ mod tests {
     #[test]
     fn never_panics_on_empty() {
         let _ = scan_for("");
+    }
+
+    #[test]
+    fn vault_legacy_token_does_not_fire_on_rust_method_call() {
+        let det = RegexDetector::new();
+        let chunk = Chunk {
+            bytes: b"let n = s.len(); let c = s.clone();",
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(
+            out.iter().all(|f| f.detector_id != "vault_legacy_token"),
+            "vault_legacy_token must not fire on ordinary Rust method calls"
+        );
+    }
+
+    #[test]
+    fn vault_legacy_token_fires_on_high_entropy_token() {
+        let det = RegexDetector::new();
+        let input = "token=s.xK9mP2qR7nL4wB8vJ5cY1eT6uA3dH0fG";
+        let chunk = Chunk {
+            bytes: input.as_bytes(),
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(
+            out.iter().any(|f| f.detector_id == "vault_legacy_token"),
+            "vault_legacy_token must fire on high-entropy token"
+        );
+    }
+
+    #[test]
+    fn sendgrid_key_detected() {
+        let det = RegexDetector::new();
+        let input = "key=SG.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let chunk = Chunk {
+            bytes: input.as_bytes(),
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(out.iter().any(|f| f.detector_id == "sendgrid_api_key"));
+    }
+
+    #[test]
+    fn gitlab_pat_detected() {
+        let det = RegexDetector::new();
+        let input = "token: glpat-xxxxxxxxxxxxxxxxxxxx";
+        let chunk = Chunk {
+            bytes: input.as_bytes(),
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(out.iter().any(|f| f.detector_id == "gitlab_pat"));
+    }
+
+    #[test]
+    fn huggingface_token_detected() {
+        let det = RegexDetector::new();
+        let input = "HF_TOKEN=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLm";
+        let chunk = Chunk {
+            bytes: input.as_bytes(),
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(out.iter().any(|f| f.detector_id == "huggingface_token"));
+    }
+
+    #[test]
+    fn keyword_filter_blocks_non_matching_rules() {
+        use crate::keyword_filter::KeywordFilter;
+        let filter = KeywordFilter::build(&[
+            (0, Some(&["discord"])),
+            (1, Some(&["github"])),
+            (2, None), // no keyword gate
+        ]);
+        let mask = filter.scan("nothing relevant here");
+        assert!(!KeywordFilter::rule_fires(&mask, 0));
+        assert!(!KeywordFilter::rule_fires(&mask, 1));
+        assert!(KeywordFilter::rule_fires(&mask, 2));
+    }
+
+    #[test]
+    fn keyword_filter_with_match() {
+        use crate::keyword_filter::KeywordFilter;
+        let filter = KeywordFilter::build(&[
+            (0, Some(&["discord"])),
+            (1, Some(&["github"])),
+        ]);
+        let mask = filter.scan("I use discord for my team");
+        assert!(KeywordFilter::rule_fires(&mask, 0));
+        assert!(!KeywordFilter::rule_fires(&mask, 1));
+    }
+
+    #[test]
+    fn stopword_does_not_suppress_high_specificity_rules() {
+        let det = RegexDetector::new();
+        let input = "sendgrid key: SG.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let chunk = Chunk {
+            bytes: input.as_bytes(),
+            offset_map: OffsetMap::new_linear(0),
+            is_message_start: true,
+            turn_id: tid(),
+        };
+        let mut scratch = DetectorScratch::default();
+        let mut out = Vec::new();
+        det.scan(&chunk, &mut scratch, &mut out);
+        assert!(out.iter().any(|f| f.detector_id == "sendgrid_api_key"));
     }
 }
