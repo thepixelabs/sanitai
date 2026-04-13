@@ -107,6 +107,13 @@ struct ScanArgs {
     /// Disable OS process sandbox — only for debugging; never in production
     #[arg(long, hide = true)]
     no_sandbox: bool,
+
+    /// Show all findings including educational and documentation-quote classifications.
+    /// By default, findings classified as Educational or DocumentationQuote are hidden
+    /// from human output and the exit-code decision. JSON/SARIF output is unaffected —
+    /// consumers filter using the `context_class` field.
+    #[arg(long)]
+    show_all: bool,
 }
 
 #[derive(clap::Args)]
@@ -407,10 +414,32 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         }
     }
 
-    let has_findings = !all_findings.is_empty();
+    // Build the human-view filter. Unless --show-all is set, hide findings
+    // classified as Educational or DocumentationQuote. JSON/SARIF outputs
+    // always include every finding so programmatic consumers can filter
+    // using the `context_class` field themselves.
+    let display_findings: Vec<Finding> = if args.show_all {
+        all_findings.clone()
+    } else {
+        all_findings
+            .iter()
+            .filter(|f| {
+                use sanitai_core::finding::ContextClass;
+                !matches!(
+                    f.context_class,
+                    ContextClass::Educational | ContextClass::DocumentationQuote
+                )
+            })
+            .cloned()
+            .collect()
+    };
+
+    // Exit code reflects the human-visible view: if the user runs without
+    // --show-all and every finding was suppressed, the tool exits clean.
+    let has_findings = !display_findings.is_empty();
 
     match args.format {
-        OutputFormat::Human => print_human(&all_findings),
+        OutputFormat::Human => print_human(&display_findings),
         OutputFormat::Json => {
             if let Err(e) = print_json(&all_findings) {
                 eprintln!("sanitai: JSON output error: {e}");

@@ -609,9 +609,9 @@ fn build_rules() -> Vec<Rule> {
             id: "vault_legacy_token",
             category: Category::Credential,
             base_confidence: Confidence::Medium,
-            matcher: Matcher::Plain(plain(r"\bs\.[0-9A-Za-z]{24,}\b")),
+            matcher: Matcher::Plain(plain(r"\b[sb]\.[0-9A-Za-z]{24,}\b")),
             validate: Some(entropy_gate_4_0),
-            keywords: None,
+            keywords: Some(&["vault", "VAULT_TOKEN", "hvault", "X-Vault-Token", "VAULT_ADDR"]),
             use_stopwords: false,
         },
         // ---------------- Crypto ----------------
@@ -897,6 +897,48 @@ fn build_rules() -> Vec<Rule> {
             keywords: Some(&["GLPAT-"]),
             use_stopwords: false,
         },
+        // ---------------- Phase 1b: context-gated rules (require AC keyword + entropy + context) ----------------
+        // These rules have high FP risk without the AC keyword gate.
+        // source: gitleaks (Twilio, Datadog) and original (Vercel)
+        Rule {
+            id: "twilio_auth_token",
+            category: Category::Credential,
+            base_confidence: Confidence::Medium,
+            matcher: Matcher::Plain(plain(r"\b[0-9a-f]{32}\b")),
+            validate: Some(|s: &str| {
+                if crate::shannon_entropy(s) >= 3.8 {
+                    Some(Confidence::Medium)
+                } else {
+                    None
+                }
+            }),
+            keywords: Some(&["twilio", "TWILIO", "auth_token", "AUTH_TOKEN", "TWILIO_AUTH_TOKEN"]),
+            use_stopwords: true,
+        },
+        Rule {
+            id: "datadog_api_key",
+            category: Category::Credential,
+            base_confidence: Confidence::Medium,
+            matcher: Matcher::Plain(plain(r"\b[0-9a-f]{32}\b")),
+            validate: Some(|s: &str| {
+                if crate::shannon_entropy(s) >= 3.8 {
+                    Some(Confidence::Medium)
+                } else {
+                    None
+                }
+            }),
+            keywords: Some(&["datadog", "DATADOG", "DD_API_KEY", "DD_APP_KEY"]),
+            use_stopwords: true,
+        },
+        Rule {
+            id: "vercel_access_token",
+            category: Category::Credential,
+            base_confidence: Confidence::Medium,
+            matcher: Matcher::Plain(plain(r"\b[A-Za-z0-9]{24}\b")),
+            validate: Some(entropy_gate_3_5),
+            keywords: Some(&["vercel", "VERCEL", "VERCEL_TOKEN", "vercel_token"]),
+            use_stopwords: true,
+        },
     ]
 }
 
@@ -1172,7 +1214,7 @@ mod tests {
     #[test]
     fn vault_legacy_token_fires_on_high_entropy_token() {
         let det = RegexDetector::new();
-        let input = "token=s.xK9mP2qR7nL4wB8vJ5cY1eT6uA3dH0fG";
+        let input = "VAULT_TOKEN=s.xK9mP2qR7nL4wB8vJ5cY1eT6uA3dH0fG";
         let chunk = Chunk {
             bytes: input.as_bytes(),
             offset_map: OffsetMap::new_linear(0),
@@ -1260,6 +1302,51 @@ mod tests {
         let mask = filter.scan("I use discord for my team");
         assert!(KeywordFilter::rule_fires(&mask, 0));
         assert!(!KeywordFilter::rule_fires(&mask, 1));
+    }
+
+    #[test]
+    fn twilio_auth_token_fires_with_context() {
+        let f = scan_for("TWILIO_AUTH_TOKEN=abcdef1234567890abcdef1234567890");
+        assert!(
+            f.iter().any(|f| f.detector_id == "twilio_auth_token"),
+            "twilio_auth_token must fire when twilio context keyword is present"
+        );
+    }
+
+    #[test]
+    fn twilio_auth_token_no_context_does_not_fire() {
+        let f = scan_for("some_random_hash=abcdef1234567890abcdef1234567890");
+        assert!(
+            !f.iter().any(|f| f.detector_id == "twilio_auth_token"),
+            "twilio_auth_token must not fire without context keyword"
+        );
+    }
+
+    #[test]
+    fn vault_legacy_token_upgraded_version_fires_with_context() {
+        let f = scan_for("vault: s.xK9mP2qR7nLwF5vB3tY8hD1jC");
+        assert!(
+            f.iter().any(|f| f.detector_id == "vault_legacy_token"),
+            "vault_legacy_token must fire with vault context keyword"
+        );
+    }
+
+    #[test]
+    fn vault_legacy_token_no_context_does_not_fire() {
+        let f = scan_for("s.xK9mP2qR7nLwF5vB3tY8hD1jC");
+        assert!(
+            !f.iter().any(|f| f.detector_id == "vault_legacy_token"),
+            "vault_legacy_token must not fire without vault context"
+        );
+    }
+
+    #[test]
+    fn datadog_api_key_fires_with_context() {
+        let f = scan_for("DD_API_KEY=abcdef1234567890abcdef1234567890");
+        assert!(
+            f.iter().any(|f| f.detector_id == "datadog_api_key"),
+            "datadog_api_key must fire when DD_API_KEY context is present"
+        );
     }
 
     #[test]
