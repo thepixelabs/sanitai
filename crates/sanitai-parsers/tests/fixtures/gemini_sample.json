@@ -1,0 +1,7 @@
+[{
+  "title": "test conversation",
+  "messages": [
+    {"role": "user", "content": "Here is my key: ghp_abcdefghijklmnopqrstuvwxyz012345"},
+    {"role": "model", "content": "I notice you shared a GitHub token."}
+  ]
+}]

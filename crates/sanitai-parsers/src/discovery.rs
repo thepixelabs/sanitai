@@ -60,6 +60,8 @@ pub fn discover_all(home: &Path) -> Vec<DiscoveredSource> {
     discover_claude_code(home, &mut out);
     discover_claude_desktop(home, &mut out);
     discover_cursor(home, &mut out);
+    discover_copilot(home, &mut out);
+    discover_gemini(home, &mut out);
     discover_extra_paths(&mut out);
 
     // Deduplicate by canonical path — a tool's directory may be referenced
@@ -137,6 +139,80 @@ fn discover_cursor(home: &Path, out: &mut Vec<DiscoveredSource>) {
     {
         let _ = home;
         let _ = out;
+    }
+}
+
+fn discover_copilot(home: &Path, out: &mut Vec<DiscoveredSource>) {
+    // VS Code keeps Copilot Chat logs under its per-user logs dir. The
+    // directory layout nests one level per session id, so we budget depth 6
+    // the same way we do for Cursor.
+    let root = {
+        #[cfg(target_os = "macos")]
+        {
+            home.join("Library").join("Application Support").join("Code").join("logs")
+        }
+        #[cfg(target_os = "linux")]
+        {
+            xdg_config_home(home).join("Code").join("logs")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            match std::env::var("APPDATA") {
+                Ok(v) => PathBuf::from(v).join("Code").join("logs"),
+                Err(_) => return,
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            let _ = home;
+            return;
+        }
+    };
+
+    if !root.exists() {
+        return;
+    }
+    for entry in WalkDir::new(&root)
+        .max_depth(6)
+        .follow_links(false)
+        .into_iter()
+        .flatten()
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if name.contains("Copilot") && name.contains("Chat") && name.ends_with(".log") {
+            push_canonical(out, SourceKind::GitHubCopilot, FileFormat::TextLike, entry.path());
+        }
+    }
+}
+
+fn discover_gemini(home: &Path, out: &mut Vec<DiscoveredSource>) {
+    // Google Takeout is usually extracted under ~/Downloads/Takeout. We
+    // probe both the Downloads path and the home root for a Takeout folder
+    // so users who drop the archive elsewhere still get a hit.
+    let candidates = [
+        home.join("Downloads").join("Takeout").join("Gemini"),
+        home.join("Takeout").join("Gemini"),
+    ];
+    for root in &candidates {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(root)
+            .max_depth(4)
+            .follow_links(false)
+            .into_iter()
+            .flatten()
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.file_name() == "MyActivity.json" {
+                push_canonical(out, SourceKind::GeminiCli, FileFormat::Json, entry.path());
+            }
+        }
     }
 }
 
