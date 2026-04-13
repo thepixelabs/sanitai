@@ -1,0 +1,23 @@
+[package]
+name    = "sanitai-tui"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+ratatui   = { workspace = true }
+crossterm = { workspace = true }
+
+sanitai-store     = { path = "../sanitai-store" }
+sanitai-redactor  = { path = "../sanitai-redactor" }
+sanitai-core      = { path = "../sanitai-core" }
+sanitai-detectors = { path = "../sanitai-detectors" }
+sanitai-parsers   = { path = "../sanitai-parsers" }
+sanitai-sandbox   = { path = "../sanitai-sandbox" }
+anyhow            = { workspace = true }
+serde_json        = { workspace = true }
+tracing           = { workspace = true }
+crossbeam-channel = { workspace = true }
+dirs-next         = { workspace = true }
+walkdir           = { workspace = true }
+futures           = { workspace = true }
+ulid              = { workspace = true }
