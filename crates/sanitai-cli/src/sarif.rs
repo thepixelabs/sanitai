@@ -228,6 +228,10 @@ mod tests {
             confidence,
             span_kind: SpanKind::Single,
             synthetic: false,
+            role: None,
+            category: sanitai_core::Category::Secret,
+            entropy_score: 0.0,
+            context_class: sanitai_core::ContextClass::Unclassified,
         }
     }
 
