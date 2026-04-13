@@ -10,6 +10,7 @@ members = [
   "crates/sanitai-fixtures",
   "crates/sanitai-store",
   "crates/sanitai-tui",
+  "tools/context-eval",
   "tools/corpus-gen",
   "tools/differential",
 ]
