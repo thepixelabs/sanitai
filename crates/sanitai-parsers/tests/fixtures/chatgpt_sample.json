@@ -1,0 +1,18 @@
+[{
+  "id": "conv1",
+  "title": "chatgpt fixture",
+  "conversation_id": "conv1",
+  "mapping": {
+    "root": {"id": "root", "parent": null, "children": ["msg1"], "message": null},
+    "msg1": {"id": "msg1", "parent": "root", "children": ["msg2"], "message": {
+      "author": {"role": "user"},
+      "content": {"content_type": "text", "parts": ["my key is AKIAIOSFODNN7EXAMPLE"]},
+      "create_time": 1700000000.0, "metadata": {}
+    }},
+    "msg2": {"id": "msg2", "parent": "msg1", "children": [], "message": {
+      "author": {"role": "assistant"},
+      "content": {"content_type": "text", "parts": ["I see you have an AWS key."]},
+      "create_time": 1700000001.0, "metadata": {}
+    }}
+  }
+}]
