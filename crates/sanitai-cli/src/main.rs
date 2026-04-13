@@ -31,13 +31,17 @@ use sanitai_core::{
 use sanitai_detectors::{
     CrossTurnConfig, CrossTurnCorrelator, RegexDetector, TransformConfig, TransformDetector,
 };
-use sanitai_parsers::{discover_all, ChatGptParser, ClaudeJsonlParser};
+use sanitai_parsers::{
+    discover_all, ChatGptParser, ClaudeJsonlParser, CopilotParser, CursorParser, GeminiParser,
+};
 use sanitai_redactor::Redactor;
 use sanitai_sandbox::create_sandbox;
 use sanitai_store::{FindingRecord, ScanRecord, Store};
 use sanitai_tui;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
+
+mod sarif;
 
 // ---------------------------------------------------------------------------
 // Arg types
@@ -75,10 +79,19 @@ enum Commands {
     Verify(VerifyArgs),
     /// Launch the interactive TUI (requires a terminal)
     Tui(TuiArgs),
+    /// List discovered LLM conversation sources on this machine
+    Discover(DiscoverArgs),
 }
 
 #[derive(clap::Args)]
 struct TuiArgs {}
+
+#[derive(clap::Args)]
+struct DiscoverArgs {
+    /// Show full absolute paths (default: relative to home directory)
+    #[arg(long)]
+    absolute: bool,
+}
 
 #[derive(clap::Args)]
 struct ScanArgs {
@@ -243,6 +256,7 @@ fn main() {
         Commands::Redact(args) => run_redact(args, cfg_path.as_deref()),
         Commands::Verify(args) => run_verify(args),
         Commands::Tui(_args) => run_tui(),
+        Commands::Discover(args) => run_discover(args),
     };
     std::process::exit(exit_code);
 }
@@ -563,28 +577,45 @@ fn scan_path(
         head: &head_buf[..head_len],
     };
 
-    // Sniff which parser handles this file
-    let claude_score =
-        sniff_score(ClaudeJsonlParser::with_path(path.to_path_buf()).can_parse(&hint));
-    let chatgpt_score = sniff_score(ChatGptParser::with_path(path.to_path_buf()).can_parse(&hint));
+    // Sniff which parser handles this file. We build each parser once and
+    // ask it to score the hint; the highest score wins. Ties prefer the
+    // more specific parsers (Claude before ChatGPT before the newcomers)
+    // via the declaration order below.
+    let claude = ClaudeJsonlParser::with_path(path.to_path_buf());
+    let chatgpt = ChatGptParser::with_path(path.to_path_buf());
+    let cursor = CursorParser::with_path(path.to_path_buf());
+    let copilot = CopilotParser::with_path(path.to_path_buf());
+    let gemini = GeminiParser::with_path(path.to_path_buf());
 
-    if claude_score == 0 && chatgpt_score == 0 {
+    let scores: [(&str, u8); 5] = [
+        ("claude", sniff_score(claude.can_parse(&hint))),
+        ("chatgpt", sniff_score(chatgpt.can_parse(&hint))),
+        ("cursor", sniff_score(cursor.can_parse(&hint))),
+        ("copilot", sniff_score(copilot.can_parse(&hint))),
+        ("gemini", sniff_score(gemini.can_parse(&hint))),
+    ];
+    let Some(winner) = scores
+        .iter()
+        .filter(|(_, s)| *s > 0)
+        .max_by_key(|(_, s)| *s)
+        .map(|(name, _)| *name)
+    else {
         tracing::debug!(path = %path.display(), "no parser recognises this file; skipping");
         return Ok((Vec::new(), 0));
-    }
+    };
 
     // Open source for streaming
     let source: Box<dyn ReadSeek> = Box::new(BufReader::new(
         File::open(path).with_context(|| format!("open {}", path.display()))?,
     ));
 
-    // Collect turns via the winning parser
-    let turns: Vec<Result<Turn, CoreError>> = if claude_score >= chatgpt_score {
-        let parser = ClaudeJsonlParser::with_path(path.to_path_buf());
-        futures::executor::block_on(parser.parse(source).collect())
-    } else {
-        let parser = ChatGptParser::with_path(path.to_path_buf());
-        futures::executor::block_on(parser.parse(source).collect())
+    let turns: Vec<Result<Turn, CoreError>> = match winner {
+        "claude" => futures::executor::block_on(claude.parse(source).collect()),
+        "chatgpt" => futures::executor::block_on(chatgpt.parse(source).collect()),
+        "cursor" => futures::executor::block_on(cursor.parse(source).collect()),
+        "copilot" => futures::executor::block_on(copilot.parse(source).collect()),
+        "gemini" => futures::executor::block_on(gemini.parse(source).collect()),
+        _ => Vec::new(),
     };
 
     let mut findings: Vec<Finding> = Vec::new();
@@ -790,78 +821,8 @@ fn print_json(findings: &[Finding]) -> Result<()> {
 /// one `result` per finding. Like `print_json`, this never emits
 /// `matched_raw` — only metadata and byte offsets.
 fn print_sarif(findings: &[Finding], tool_version: &str) -> Result<()> {
-    use serde_json::{json, Value};
-
-    // Collect unique rules (one per detector_id), preserving first-seen order.
-    let rules: Vec<Value> = {
-        let mut seen = std::collections::HashSet::new();
-        findings
-            .iter()
-            .filter(|f| seen.insert(f.detector_id))
-            .map(|f| {
-                json!({
-                    "id": f.detector_id,
-                    "name": f.detector_id,
-                    "shortDescription": { "text": format!("Detected {}", f.detector_id) },
-                    "defaultConfiguration": { "level": "error" }
-                })
-            })
-            .collect()
-    };
-
-    let results: Vec<Value> = findings
-        .iter()
-        .map(|f| {
-            let level = match f.confidence {
-                Confidence::High => "error",
-                Confidence::Medium => "warning",
-                Confidence::Low => "note",
-            };
-            json!({
-                "ruleId": f.detector_id,
-                "level": level,
-                "message": {
-                    "text": format!(
-                        "{} detected at bytes {}..{}",
-                        f.detector_id, f.byte_range.start, f.byte_range.end
-                    )
-                },
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": {
-                            "uri": f.turn_id.0.to_string_lossy()
-                        },
-                        "region": {
-                            "byteOffset": f.byte_range.start,
-                            "byteLength": f.byte_range.len()
-                        }
-                    }
-                }],
-                "properties": {
-                    "turn": f.turn_id.1,
-                    "synthetic": f.synthetic
-                }
-            })
-        })
-        .collect();
-
-    let sarif = json!({
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "sanitai",
-                    "version": tool_version,
-                    "informationUri": "https://github.com/sanitai/sanitai",
-                    "rules": rules
-                }
-            },
-            "results": results
-        }]
-    });
-
-    println!("{}", serde_json::to_string_pretty(&sarif)?);
+    let log = sarif::findings_to_sarif(findings, tool_version);
+    println!("{}", serde_json::to_string_pretty(&log)?);
     Ok(())
 }
 
@@ -1036,4 +997,33 @@ fn run_verify(args: VerifyArgs) -> i32 {
     } else {
         1
     }
+}
+
+// ---------------------------------------------------------------------------
+// discover
+// ---------------------------------------------------------------------------
+
+fn run_discover(args: DiscoverArgs) -> i32 {
+    let home = dirs_next::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let sources = discover_all(&home);
+    if sources.is_empty() {
+        println!("sanitai: no LLM conversation sources found.");
+        println!("Try `sanitai scan <path>` to scan a specific file.");
+        return 0;
+    }
+
+    println!("Found {} conversation source(s):", sources.len());
+    for src in &sources {
+        let display = if args.absolute {
+            src.path.display().to_string()
+        } else {
+            match src.path.strip_prefix(&home) {
+                Ok(rel) => format!("~/{}", rel.display()),
+                Err(_) => src.path.display().to_string(),
+            }
+        };
+        println!("  [{:?}] {}", src.kind, display);
+    }
+    println!("\nUse `sanitai scan <path>` to scan a specific source.");
+    0
 }
