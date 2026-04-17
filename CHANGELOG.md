@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v0.2.3 (2026-04-17)
+
+### Bug Fixes
+
+- **ci**: Make build-release idempotent with pre-existing tag and skip cargo-deny on macOS
+  ([`29a32b0`](https://github.com/thepixelabs/sanitai/commit/29a32b080c6237269cc813e103ea900a1607b567))
+
+- build-release: the `release` job ran `gh release create` but the release already exists
+  (semantic-release creates it via upload_to_release). Probe with `gh release view` and only create
+  when missing, so the upload step is reachable and idempotent across retries. - build-release:
+  disable SLSA `upload-assets`. Uploading to the release from within the SLSA call races against the
+  release job — the release does not exist yet at that point, so upload-assets failed with "not
+  include valid file", which cascaded into the SLSA final gate failing and skipping the release job
+  entirely. Provenance is still produced as a workflow artifact; the release job downloads and
+  uploads *.intoto.jsonl alongside tarballs/sigs/SBOM. - ci: guard `cargo-deny` with `if: runner.os
+  == 'Linux'`. The cargo-deny-action is Docker-based and fails on macOS runners with "Container
+  action is only supported on Linux". One Linux run per push is enough for supply-chain checks; the
+  macOS matrix is there for platform-specific test coverage.
+
+Also manually uploaded the existing v0.2.2 build artifacts (tarballs, sha256, sigs, certs, SBOM)
+  from workflow run 24557160984 to the v0.2.2 GitHub Release, which was previously empty. Future
+  releases will do this automatically once this commit lands.
+
+
 ## v0.2.2 (2026-04-17)
 
 ### Bug Fixes
