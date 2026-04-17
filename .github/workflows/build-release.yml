@@ -241,7 +241,13 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@5a775b367a56d5bd118a224a811bba288150a563 # v2.0.0
     with:
       base64-subjects: ${{ needs.provenance-hashes.outputs.hashes }}
-      upload-assets: true
+      # upload-assets: true would have SLSA upload provenance.intoto.jsonl to
+      # the GitHub release — but the release does not exist yet at this point
+      # (the `release` job below creates it). Leaving this false keeps
+      # provenance as a workflow artifact; the release job downloads and
+      # uploads it with the rest of the artifacts so everything ships
+      # together on the tagged release.
+      upload-assets: false
 
   sbom:
     name: Generate SBOM
@@ -317,6 +323,16 @@ jobs:
           name: sbom
           path: dist
 
+      # SLSA generator publishes provenance.intoto.jsonl as an artifact whose
+      # name equals the release tag (e.g. `v0.2.2.intoto.jsonl`). Using a
+      # glob pattern keeps this resilient to any future renames.
+      - name: Download SLSA provenance
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          pattern: "*.intoto.jsonl"
+          merge-multiple: true
+
       - name: Export per-target SHA-256 outputs
         id: shas
         run: |
@@ -330,20 +346,24 @@ jobs:
           echo "sha_linux_arm64=$(get_sha ${BIN}-${VERSION}-aarch64-unknown-linux-gnu.tar.gz)" >> "$GITHUB_OUTPUT"
           echo "sha_linux_musl_x64=$(get_sha ${BIN}-${VERSION}-x86_64-unknown-linux-musl.tar.gz)" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # semantic-release already created the release with auto-generated
+        # notes — `gh release create` would fail with "already exists". Probe
+        # first and only create when missing; then upload all artifacts with
+        # --clobber so a retried run is idempotent.
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          gh release create "$TAG" --generate-notes --verify-tag
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --generate-notes --verify-tag
+          fi
           cd dist
-          gh release upload "$TAG" \
-            *.tar.gz \
-            *.sha256 \
-            *.sig \
-            *.cert \
-            sbom.cyclonedx.json \
-            --clobber
+          # Provenance glob is optional — SLSA may or may not have produced
+          # files depending on matrix outcome. Expand only what exists.
+          shopt -s nullglob
+          FILES=( *.tar.gz *.sha256 *.sig *.cert sbom.cyclonedx.json *.intoto.jsonl )
+          gh release upload "$TAG" "${FILES[@]}" --clobber
 
   bump-tap:
     name: Open version-bump PR against homebrew-tap

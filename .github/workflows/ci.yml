@@ -96,7 +96,11 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: test
         run: cargo test --workspace --locked
+      # cargo-deny-action is a Docker-based action and only supports Linux
+      # runners. Run it once on ubuntu rather than letting it fail loudly on
+      # macOS where the container runtime isn't available.
       - name: cargo-deny
+        if: runner.os == 'Linux'
         uses: EmbarkStudios/cargo-deny-action@ef301417264190a1eb9f26fcf171642070085c5b # v1
         with:
           command: check
