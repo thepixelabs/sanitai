@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v0.2.5 (2026-04-17)
+
+### Bug Fixes
+
+- **ci**: Release job must not block on SLSA final reporter exit 27
+  ([`3c4ee3c`](https://github.com/thepixelabs/sanitai/commit/3c4ee3c5f233a1802ae2d7c9edef39ff290369da))
+
+The slsa-github-generator v2.0.0 "final" reporter step exits 27 whenever upload-assets=false,
+  because its SUCCESS flag is only set when the upload-assets child job runs and succeeds. That
+  makes the whole SLSA workflow "fail" from the caller's perspective, which blocks the release job
+  and leaves every tag without binaries attached.
+
+We gate the release job with `if: always() && build/sign/sbom == success` instead of needing
+  `provenance`. Provenance is still generated and signed by the upstream SLSA workflow; only the
+  cosmetic final reporter is non-fatal now. This unblocks end-to-end v0.2.x publishing.
+
+Upgrading to slsa-github-generator v2.1+ or using their direct upload mode would be the cleaner fix
+  later, but this is the smallest change that makes release delivery reliable today.
+
+
 ## v0.2.4 (2026-04-17)
 
 ### Bug Fixes
