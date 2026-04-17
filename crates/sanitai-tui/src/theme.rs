@@ -1,3 +1,7 @@
+// Palette scaffolding retained for upcoming theming support (settings screen).
+// Unused until settings wires through — suppress lints until then.
+#![allow(dead_code)]
+
 use ratatui::style::Color;
 
 pub struct Theme {

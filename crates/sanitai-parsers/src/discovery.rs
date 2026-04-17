@@ -149,7 +149,10 @@ fn discover_copilot(home: &Path, out: &mut Vec<DiscoveredSource>) {
     let root = {
         #[cfg(target_os = "macos")]
         {
-            home.join("Library").join("Application Support").join("Code").join("logs")
+            home.join("Library")
+                .join("Application Support")
+                .join("Code")
+                .join("logs")
         }
         #[cfg(target_os = "linux")]
         {
@@ -183,7 +186,12 @@ fn discover_copilot(home: &Path, out: &mut Vec<DiscoveredSource>) {
         }
         let name = entry.file_name().to_string_lossy();
         if name.contains("Copilot") && name.contains("Chat") && name.ends_with(".log") {
-            push_canonical(out, SourceKind::GitHubCopilot, FileFormat::TextLike, entry.path());
+            push_canonical(
+                out,
+                SourceKind::GitHubCopilot,
+                FileFormat::TextLike,
+                entry.path(),
+            );
         }
     }
 }

@@ -91,9 +91,8 @@ fn main() -> Result<()> {
         if line.is_empty() || line.starts_with("//") {
             continue;
         }
-        let entry: CorpusEntry = serde_json::from_str(line).with_context(|| {
-            format!("parse corpus line: {}", &line[..line.len().min(60)])
-        })?;
+        let entry: CorpusEntry = serde_json::from_str(line)
+            .with_context(|| format!("parse corpus line: {}", &line[..line.len().min(60)]))?;
 
         total += 1;
         let expected = parse_context_class(&entry.expected_class);

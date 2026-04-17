@@ -84,11 +84,7 @@ impl ConversationParser for GeminiParser {
 
     fn can_parse(&self, hint: &SourceHint<'_>) -> Sniff {
         let path_str = hint.path.to_string_lossy();
-        let name = hint
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = hint.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let looks_gemini = path_str.contains("Gemini") && name == "MyActivity.json";
         if !looks_gemini {
             return Sniff::No;

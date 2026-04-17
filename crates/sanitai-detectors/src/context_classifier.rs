@@ -346,7 +346,10 @@ mod tests {
             ..mk_finding(0, "sk-ant-api03-xK9mP2qR7nLwF5vB3tY8hD1jC6xK9mP2qR7nLwF5")
         };
         let classifier = ContextClassifier::with_defaults();
-        assert_eq!(classifier.classify(&finding, &turns), ContextClass::RealPaste);
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::RealPaste
+        );
     }
 
     #[test]
@@ -389,7 +392,10 @@ mod tests {
             contributing_turns: vec![0, 1],
         };
         let classifier = ContextClassifier::with_defaults();
-        assert_eq!(classifier.classify(&finding, &turns), ContextClass::RealPaste);
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::RealPaste
+        );
     }
 
     #[test]

@@ -27,8 +27,7 @@ fn discovers_copilot_and_gemini_on_macos() {
     let home = mktemp("mac");
 
     // Copilot: ~/Library/Application Support/Code/logs/<sess>/GitHub Copilot Chat.log
-    let copilot_dir = home
-        .join("Library/Application Support/Code/logs/20260413T120000");
+    let copilot_dir = home.join("Library/Application Support/Code/logs/20260413T120000");
     fs::create_dir_all(&copilot_dir).expect("mkdir copilot");
     let copilot_log = copilot_dir.join("GitHub Copilot Chat.log");
     fs::write(&copilot_log, b"placeholder\n").expect("write copilot");

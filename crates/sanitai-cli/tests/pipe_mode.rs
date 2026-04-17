@@ -106,10 +106,7 @@ fn exit_code_zero_on_clean_file() {
         .to_str()
         .expect("fixture path is valid UTF-8")]);
 
-    assert_eq!(
-        code, 0,
-        "expected exit 0 on a clean file; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "expected exit 0 on a clean file; stderr: {stderr}");
 }
 
 #[test]
@@ -232,10 +229,8 @@ fn json_output_is_valid_json_array() {
         "expected exit 1 with secrets present; stderr: {stderr}"
     );
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).unwrap_or_else(|e| {
-            panic!("--format json stdout is not valid JSON: {e}\n---\n{stdout}")
-        });
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("--format json stdout is not valid JSON: {e}\n---\n{stdout}"));
 
     let findings = parsed
         .as_array()
@@ -290,10 +285,8 @@ fn sarif_output_has_required_schema_fields() {
         "expected exit 1 with secrets present; stderr: {stderr}"
     );
 
-    let sarif: serde_json::Value =
-        serde_json::from_str(&stdout).unwrap_or_else(|e| {
-            panic!("--format sarif stdout is not valid JSON: {e}\n---\n{stdout}")
-        });
+    let sarif: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("--format sarif stdout is not valid JSON: {e}\n---\n{stdout}"));
 
     assert!(
         sarif.get("$schema").is_some(),
@@ -420,10 +413,7 @@ fn repeated_scans_on_same_file_are_idempotent() {
     let (stdout_a, _, code_a) = run_scan(&[path_str]);
     let (stdout_b, _, code_b) = run_scan(&[path_str]);
 
-    assert_eq!(
-        code_a, 0,
-        "first scan of clean file must exit 0"
-    );
+    assert_eq!(code_a, 0, "first scan of clean file must exit 0");
     assert_eq!(
         code_b, 0,
         "second scan of same clean file must also exit 0 (store idempotence)"

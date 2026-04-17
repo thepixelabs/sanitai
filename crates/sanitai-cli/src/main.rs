@@ -37,7 +37,6 @@ use sanitai_parsers::{
 use sanitai_redactor::Redactor;
 use sanitai_sandbox::create_sandbox;
 use sanitai_store::{FindingRecord, ScanRecord, Store};
-use sanitai_tui;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -487,7 +486,11 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
             OutputFormat::Sarif => "sarif",
         }
         .to_owned(),
-        exit_code: if has_findings && !args.exit_zero { 1 } else { 0 },
+        exit_code: if has_findings && !args.exit_zero {
+            1
+        } else {
+            0
+        },
         findings_high: all_findings
             .iter()
             .filter(|f| matches!(f.confidence, Confidence::High))
@@ -543,8 +546,7 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
 
     match Store::open() {
         Ok(store) => {
-            if let Err(e) = store.record_scan(&scan_record, &scanned_file_paths, &finding_records)
-            {
+            if let Err(e) = store.record_scan(&scan_record, &scanned_file_paths, &finding_records) {
                 tracing::warn!("history store write failed: {e}");
             }
         }

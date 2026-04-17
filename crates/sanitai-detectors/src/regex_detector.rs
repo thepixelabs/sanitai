@@ -611,7 +611,13 @@ fn build_rules() -> Vec<Rule> {
             base_confidence: Confidence::Medium,
             matcher: Matcher::Plain(plain(r"\b[sb]\.[0-9A-Za-z]{24,}\b")),
             validate: Some(entropy_gate_4_0),
-            keywords: Some(&["vault", "VAULT_TOKEN", "hvault", "X-Vault-Token", "VAULT_ADDR"]),
+            keywords: Some(&[
+                "vault",
+                "VAULT_TOKEN",
+                "hvault",
+                "X-Vault-Token",
+                "VAULT_ADDR",
+            ]),
             use_stopwords: false,
         },
         // ---------------- Crypto ----------------
@@ -912,7 +918,13 @@ fn build_rules() -> Vec<Rule> {
                     None
                 }
             }),
-            keywords: Some(&["twilio", "TWILIO", "auth_token", "AUTH_TOKEN", "TWILIO_AUTH_TOKEN"]),
+            keywords: Some(&[
+                "twilio",
+                "TWILIO",
+                "auth_token",
+                "AUTH_TOKEN",
+                "TWILIO_AUTH_TOKEN",
+            ]),
             use_stopwords: true,
         },
         Rule {
@@ -966,8 +978,11 @@ impl Default for RegexDetector {
 impl RegexDetector {
     pub fn new() -> Self {
         let r = rules();
-        let kw_pairs: Vec<(usize, Option<&'static [&'static str]>)> =
-            r.iter().enumerate().map(|(i, rule)| (i, rule.keywords)).collect();
+        let kw_pairs: Vec<(usize, Option<&'static [&'static str]>)> = r
+            .iter()
+            .enumerate()
+            .map(|(i, rule)| (i, rule.keywords))
+            .collect();
         let keyword_filter = KeywordFilter::build(&kw_pairs);
         Self {
             rules: r,
@@ -1296,10 +1311,7 @@ mod tests {
     #[test]
     fn keyword_filter_with_match() {
         use crate::keyword_filter::KeywordFilter;
-        let filter = KeywordFilter::build(&[
-            (0, Some(&["discord"])),
-            (1, Some(&["github"])),
-        ]);
+        let filter = KeywordFilter::build(&[(0, Some(&["discord"])), (1, Some(&["github"]))]);
         let mask = filter.scan("I use discord for my team");
         assert!(KeywordFilter::rule_fires(&mask, 0));
         assert!(!KeywordFilter::rule_fires(&mask, 1));
@@ -1353,7 +1365,8 @@ mod tests {
     #[test]
     fn stopword_does_not_suppress_high_specificity_rules() {
         let det = RegexDetector::new();
-        let input = "sendgrid key: SG.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let input =
+            "sendgrid key: SG.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let chunk = Chunk {
             bytes: input.as_bytes(),
             offset_map: OffsetMap::new_linear(0),

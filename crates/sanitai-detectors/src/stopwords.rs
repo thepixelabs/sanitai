@@ -17,18 +17,37 @@ pub fn stopwords() -> &'static HashSet<&'static str> {
     STOPWORDS.get_or_init(|| {
         let words: &[&str] = &[
             // Generic placeholder strings safe to suppress
-            "placeholder", "your_api_key", "your_secret", "your_token",
-            "YOUR_API_KEY", "YOUR_SECRET_KEY", "YOUR_TOKEN", "YOUR_PASSWORD",
-            "<YOUR_API_KEY>", "<API_KEY>", "<TOKEN>", "<SECRET>",
-            "INSERT_YOUR_KEY_HERE", "REPLACE_WITH_YOUR_KEY",
-            "example_key", "sample_key", "test_key", "dummy_key",
-            "fake_key", "my_api_key", "api_key_here",
+            "placeholder",
+            "your_api_key",
+            "your_secret",
+            "your_token",
+            "YOUR_API_KEY",
+            "YOUR_SECRET_KEY",
+            "YOUR_TOKEN",
+            "YOUR_PASSWORD",
+            "<YOUR_API_KEY>",
+            "<API_KEY>",
+            "<TOKEN>",
+            "<SECRET>",
+            "INSERT_YOUR_KEY_HERE",
+            "REPLACE_WITH_YOUR_KEY",
+            "example_key",
+            "sample_key",
+            "test_key",
+            "dummy_key",
+            "fake_key",
+            "my_api_key",
+            "api_key_here",
             // Common example values safe to suppress
-            "xxxxxxxxxxxxxxxxxxxx", "XXXXXXXXXXXXXXXXXXXX",
-            "yyyyyyyyyyy", "YYYYYYYYYYY",
+            "xxxxxxxxxxxxxxxxxxxx",
+            "XXXXXXXXXXXXXXXXXXXX",
+            "yyyyyyyyyyy",
+            "YYYYYYYYYYY",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             // Gitleaks stopwords appropriate for conversations
-            "adafruit", "documentation", "example.com",
+            "adafruit",
+            "documentation",
+            "example.com",
         ];
         words.iter().copied().collect()
     })

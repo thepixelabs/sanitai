@@ -7,7 +7,10 @@ use ratatui::{
     style::{Modifier, Style},
     widgets::Widget,
 };
-use sanitai_core::{config::RedactMode, finding::{Confidence, Finding}};
+use sanitai_core::{
+    config::RedactMode,
+    finding::{Confidence, Finding},
+};
 use sanitai_redactor::Redactor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -234,7 +237,7 @@ fn render_list(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
         let this_file = Arc::clone(&finding.turn_id.0);
 
         // Separator when file changes.
-        let new_file = last_file.as_ref().map_or(true, |lf| *lf != this_file);
+        let new_file = last_file.as_ref().is_none_or(|lf| *lf != this_file);
         if new_file {
             if last_file.is_some() {
                 // Skip a separator row if we have room.
@@ -244,7 +247,11 @@ fn render_list(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("?");
-                    let sep = format!("  \u{2500}\u{2500} {} \u{2500}{}", basename, "\u{2500}".repeat(24));
+                    let sep = format!(
+                        "  \u{2500}\u{2500} {} \u{2500}{}",
+                        basename,
+                        "\u{2500}".repeat(24)
+                    );
                     buf.set_string(
                         list_area.left(),
                         y,
@@ -340,10 +347,7 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
         .filter(|f| f.turn_id.0 == file_arc)
         .collect();
 
-    let basename = file_arc
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("?");
+    let basename = file_arc.file_name().and_then(|n| n.to_str()).unwrap_or("?");
     let out_name = format!("{}.sanitized", basename);
     let count = file_findings.len();
 
@@ -382,9 +386,7 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
             fx,
             y,
             clip_str(basename, available),
-            Style::default()
-                .fg(COLOR_FG)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_FG).add_modifier(Modifier::BOLD),
         );
     }
 
@@ -442,7 +444,12 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
             header_label,
             "\u{2500}".repeat(dashes_right)
         );
-        buf.set_string(ix, y, clip_str(&top_border, inner_w), Style::default().fg(COLOR_MUTED));
+        buf.set_string(
+            ix,
+            y,
+            clip_str(&top_border, inner_w),
+            Style::default().fg(COLOR_MUTED),
+        );
     }
 
     // Rows 8..N-1: detector entries (up to 2 shown to fit in box height)
@@ -461,7 +468,12 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
         buf.set_string(ix, y, "\u{2502}", Style::default().fg(COLOR_MUTED));
         let right_border_x = ix + inner_w as u16 - 1;
         if right_border_x < area.right() {
-            buf.set_string(right_border_x, y, "\u{2502}", Style::default().fg(COLOR_MUTED));
+            buf.set_string(
+                right_border_x,
+                y,
+                "\u{2502}",
+                Style::default().fg(COLOR_MUTED),
+            );
         }
     }
 
@@ -469,11 +481,13 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
     {
         let y = dialog_y + 10;
         let list_w = inner_w.saturating_sub(2);
-        let bottom_border = format!(
-            "\u{2514}{}\u{2518}",
-            "\u{2500}".repeat(list_w)
+        let bottom_border = format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(list_w));
+        buf.set_string(
+            ix,
+            y,
+            clip_str(&bottom_border, inner_w),
+            Style::default().fg(COLOR_MUTED),
         );
-        buf.set_string(ix, y, clip_str(&bottom_border, inner_w), Style::default().fg(COLOR_MUTED));
     }
 
     // Row 12: "[ y  confirm ]    [ n  cancel ]"
@@ -489,17 +503,10 @@ fn render_confirm(area: Rect, buf: &mut Buffer, screen: &RedactScreen) {
             cx,
             y,
             confirm_label,
-            Style::default()
-                .fg(COLOR_SAFE)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(COLOR_SAFE).add_modifier(Modifier::BOLD),
         );
         let nx = cx + confirm_label.len() as u16 + 4;
-        buf.set_string(
-            nx,
-            y,
-            cancel_label,
-            Style::default().fg(COLOR_DANGER),
-        );
+        buf.set_string(nx, y, cancel_label, Style::default().fg(COLOR_DANGER));
     }
 }
 

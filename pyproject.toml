@@ -7,6 +7,12 @@ branch = "main"
 commit_parser = "angular"
 tag_format = "v{version}"
 changelog_file = "CHANGELOG.md"
+# After bumping workspace.package.version, regenerate Cargo.lock so the version
+# bump commit also updates every workspace-member entry in the lockfile. Without
+# this, the tagged commit has a stale Cargo.lock and every subsequent `cargo
+# --locked` build on that tag fails (e.g. the build-release workflow).
+# cargo is provided by the GitHub runner image; we do not install rust here.
+build_command = "cargo update --workspace --offline || cargo update --workspace"
 
 [tool.semantic_release.commit_parser_options]
 # Release rules mirror altergo's config:

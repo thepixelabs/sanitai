@@ -1,9 +1,4 @@
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::Style,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
 use crate::menu::{COLOR_BG, COLOR_FG, COLOR_FOCUS, COLOR_MUTED, COLOR_WARN};
 
@@ -58,10 +53,7 @@ fn render_border(area: Rect, buf: &mut Buffer) {
     buf.set_string(x0, y0, &top_line, border_style);
 
     // Bottom border: ╚══════╝
-    let bottom_line = format!(
-        "\u{255a}{}\u{255d}",
-        "\u{2550}".repeat(inner_width)
-    );
+    let bottom_line = format!("\u{255a}{}\u{255d}", "\u{2550}".repeat(inner_width));
     buf.set_string(x0, y1, &bottom_line, border_style);
 
     // Left and right borders
@@ -84,27 +76,94 @@ struct Row {
 
 fn content_rows() -> Vec<Row> {
     vec![
-        Row { key: None,         desc: "Navigation" },
-        Row { key: None,         desc: "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
-        Row { key: Some("j / \u{2193}"),    desc: "Move down" },
-        Row { key: Some("k / \u{2191}"),    desc: "Move up" },
-        Row { key: Some("Enter"),  desc: "Select / confirm" },
-        Row { key: Some("q / Esc"), desc: "Go back / quit" },
-        Row { key: Some("Tab"),    desc: "Switch tabs (Settings)" },
-        Row { key: None,         desc: "" }, // blank spacer
-        Row { key: None,         desc: "Scanning" },
-        Row { key: None,         desc: "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
-        Row { key: Some("S"),      desc: "Run scan from main menu" },
-        Row { key: Some("(any key)"), desc: "Dismiss results" },
-        Row { key: None,         desc: "" }, // blank spacer
-        Row { key: None,         desc: "History" },
-        Row { key: None,         desc: "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
-        Row { key: Some("/"),      desc: "Start filter" },
-        Row { key: Some("Esc"),    desc: "Clear filter / cancel" },
-        Row { key: None,         desc: "" }, // blank spacer
-        Row { key: None,         desc: "General" },
-        Row { key: None,         desc: "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
-        Row { key: Some("?"),      desc: "Show this help" },
+        Row {
+            key: None,
+            desc: "Navigation",
+        },
+        Row {
+            key: None,
+            desc:
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("j / \u{2193}"),
+            desc: "Move down",
+        },
+        Row {
+            key: Some("k / \u{2191}"),
+            desc: "Move up",
+        },
+        Row {
+            key: Some("Enter"),
+            desc: "Select / confirm",
+        },
+        Row {
+            key: Some("q / Esc"),
+            desc: "Go back / quit",
+        },
+        Row {
+            key: Some("Tab"),
+            desc: "Switch tabs (Settings)",
+        },
+        Row {
+            key: None,
+            desc: "",
+        }, // blank spacer
+        Row {
+            key: None,
+            desc: "Scanning",
+        },
+        Row {
+            key: None,
+            desc:
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("S"),
+            desc: "Run scan from main menu",
+        },
+        Row {
+            key: Some("(any key)"),
+            desc: "Dismiss results",
+        },
+        Row {
+            key: None,
+            desc: "",
+        }, // blank spacer
+        Row {
+            key: None,
+            desc: "History",
+        },
+        Row {
+            key: None,
+            desc:
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("/"),
+            desc: "Start filter",
+        },
+        Row {
+            key: Some("Esc"),
+            desc: "Clear filter / cancel",
+        },
+        Row {
+            key: None,
+            desc: "",
+        }, // blank spacer
+        Row {
+            key: None,
+            desc: "General",
+        },
+        Row {
+            key: None,
+            desc:
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("?"),
+            desc: "Show this help",
+        },
     ]
 }
 
@@ -117,7 +176,7 @@ fn render_content(area: Rect, buf: &mut Buffer) {
     // We reserve the last interior row for the footer hint.
     let y_start = area.top() + 1;
     let y_end_border = area.bottom().saturating_sub(1); // bottom border row
-    // Last content row is y_end_border - 2 (leave one row for footer).
+                                                        // Last content row is y_end_border - 2 (leave one row for footer).
     let footer_row = y_end_border.saturating_sub(1);
 
     let rows = content_rows();

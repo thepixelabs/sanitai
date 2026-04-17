@@ -17,10 +17,7 @@ pub fn main_layout(area: Rect) -> (Rect, Rect, Rect) {
     // Split body: menu on left, Nix on right (fixed 22 cols)
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(30),
-            Constraint::Length(22),
-        ])
+        .constraints([Constraint::Min(30), Constraint::Length(22)])
         .split(body);
 
     (body_chunks[0], body_chunks[1], footer)

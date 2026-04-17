@@ -187,7 +187,14 @@ fn walk_value(
     match v {
         serde_json::Value::Array(items) => {
             for item in items {
-                walk_value(item, path, conversation_key, turn_index, running_offset, out);
+                walk_value(
+                    item,
+                    path,
+                    conversation_key,
+                    turn_index,
+                    running_offset,
+                    out,
+                );
             }
         }
         serde_json::Value::Object(map) => {
@@ -213,16 +220,21 @@ fn walk_value(
             // Continue walking nested structures: Cursor often wraps chat
             // arrays under `conversation`, `messages`, `tabs`, etc.
             for (_, child) in map {
-                walk_value(child, path, conversation_key, turn_index, running_offset, out);
+                walk_value(
+                    child,
+                    path,
+                    conversation_key,
+                    turn_index,
+                    running_offset,
+                    out,
+                );
             }
         }
         _ => {}
     }
 }
 
-fn extract_message(
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> Option<(Role, String)> {
+fn extract_message(map: &serde_json::Map<String, serde_json::Value>) -> Option<(Role, String)> {
     let role_str = map.get("role").and_then(|v| v.as_str())?;
     let role = match role_str {
         "user" => Role::User,
