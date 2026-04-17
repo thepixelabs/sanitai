@@ -92,6 +92,7 @@ mod linux {
     const BPF_ABS: u16 = 0x20;
     const BPF_JMP: u16 = 0x05;
     const BPF_JEQ: u16 = 0x10;
+    #[allow(dead_code)] // Bitmask compare op reserved for future argument-level filters.
     const BPF_JSET: u16 = 0x40;
     const BPF_K: u16 = 0x00;
     const BPF_RET: u16 = 0x06;
@@ -101,7 +102,12 @@ mod linux {
     const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
 
     // Audit arch constants.
+    // Either X86_64 or AARCH64 is used below depending on build target arch;
+    // the other is dead on that build. Allow per-const to avoid masking real
+    // dead code elsewhere in this module.
+    #[allow(dead_code)]
     const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    #[allow(dead_code)]
     const AUDIT_ARCH_AARCH64: u32 = 0xC000_00B7;
 
     #[cfg(target_arch = "x86_64")]
@@ -123,7 +129,7 @@ mod linux {
 
     #[repr(C)]
     #[derive(Clone, Copy)]
-    struct SockFilter {
+    pub(crate) struct SockFilter {
         code: u16,
         jt: u8,
         jf: u8,

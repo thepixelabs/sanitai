@@ -11,8 +11,11 @@ changelog_file = "CHANGELOG.md"
 # bump commit also updates every workspace-member entry in the lockfile. Without
 # this, the tagged commit has a stale Cargo.lock and every subsequent `cargo
 # --locked` build on that tag fails (e.g. the build-release workflow).
-# cargo is provided by the GitHub runner image; we do not install rust here.
-build_command = "cargo update --workspace --offline || cargo update --workspace"
+#
+# NOTE: python-semantic-release will not auto-stage files modified by
+# build_command — we must `git add` the lockfile explicitly here so it is
+# picked up by the version-bump commit.
+build_command = "cargo update --workspace --offline || cargo update --workspace; git add Cargo.lock"
 
 [tool.semantic_release.commit_parser_options]
 # Release rules mirror altergo's config:
