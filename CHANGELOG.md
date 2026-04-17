@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.2.2 (2026-04-17)
+
+### Bug Fixes
+
+- **ci**: Fix sandbox clippy errors (Linux-only dead code + private interface) and auto-commit
+  Cargo.lock on release
+  ([`a6761de`](https://github.com/thepixelabs/sanitai/commit/a6761def3e9cdc6b81d73d517edd4cfc6196c3b1))
+
+- sanitai-sandbox: mark SockFilter as pub(crate) to satisfy private_interfaces (build_filter returns
+  Vec<SockFilter>), and allow dead_code on BPF_JSET and the non-selected AUDIT_ARCH_* constant.
+  These only surface on Linux where the seccomp module compiles — my local macOS clippy run did not
+  catch them in the previous commit. - pyproject.toml: append `git add Cargo.lock` to build_command
+  so the refreshed lockfile actually rides along in the version-bump commit. python-semantic-release
+  does not stage build_command side-effects automatically, which is why v0.2.1's tag ended up with a
+  stale Cargo.lock even though `cargo update --workspace` ran successfully.
+
+
 ## v0.2.1 (2026-04-17)
 
 ### Bug Fixes
