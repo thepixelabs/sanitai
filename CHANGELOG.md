@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v0.2.1 (2026-04-17)
+
+### Bug Fixes
+
+- **ci**: Resolve fmt, clippy, and release build failures
+  ([`372771f`](https://github.com/thepixelabs/sanitai/commit/372771f3526aad87d085bdbb503b625b67c54d7e))
+
+- Apply cargo fmt across workspace (rustfmt 1.87.0) - Fix clippy --all-targets -D warnings:
+  derivable_impls on ContextClass, new_without_default on Menu, manual_flatten in scan_runner,
+  if_same_then_else in settings, unnecessary_map_or in redact_screen, redundant `use sanitai_tui`,
+  and allow expect/unwrap inside sarif tests module - Annotate unused Theme palette scaffolding with
+  dead_code allow - Regenerate Cargo.lock (adds missing context-eval entry; bumps workspace members
+  from 0.1.0 to 0.1.2 to match Cargo.toml workspace.package.version) - Pin cargo-zigbuild to ^0.21
+  in reproducible-verify and build-release workflows. Zigbuild 0.22 requires rustc 1.88; we pin to
+  1.87.0 via rust-toolchain.toml. Bump together if the rustc pin ever moves. - Add build_command =
+  "cargo update --workspace" to semantic-release config so Cargo.lock gets refreshed on version
+  bumps; install the pinned rust toolchain in release.yml so that command has a stable cargo
+  available.
+
+The v0.2.0 build-release workflow failed because Cargo.lock on tag v0.2.0 was stale
+  (semantic-release only updated Cargo.toml). That tag cannot be retroactively rebuilt; v0.2.1 (cut
+  by this fix commit) will be the first release with a correct Cargo.lock and green build-release
+  pipeline.
+
+
 ## v0.2.0 (2026-04-17)
 
 ### Bug Fixes
