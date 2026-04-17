@@ -1,6 +1,35 @@
 # CHANGELOG
 
 
+## v0.2.4 (2026-04-17)
+
+### Bug Fixes
+
+- **ci**: Prevent rust-toolchain component conflict in release build_command
+  ([`0a2a589`](https://github.com/thepixelabs/sanitai/commit/0a2a5898dc3f32daa4375034edeba2af216d8e95))
+
+v0.2.3's release job silently swallowed a cargo update failure because the || fallback hid the
+  error. Root cause:
+
+dtolnay/rust-toolchain@stable installs a 1.87.0 toolchain with only the default components, then the
+  first `cargo update` invocation triggers rust-toolchain.toml which asks for
+  rustfmt/clippy/rust-src. The auto-install races against the already-installed toolchain and fails
+  with "detected conflict: bin/cargo-clippy". With the previous `|| cargo update --workspace`
+  fallback plus no `set -e`, the whole build_command returned 0 but Cargo.lock was never updated, so
+  v0.2.3 shipped a stale lockfile and every --locked build on that tag broke.
+
+Fixes:
+
+- release.yml: pass `components: rustfmt, clippy, rust-src` to the rust-toolchain action so it
+  installs everything rust-toolchain.toml asks for up front. No auto-install, no conflict. -
+  pyproject.toml build_command: drop the `|| cargo update --workspace` fallback and add `set -e`. If
+  `cargo update` fails, the release must fail loudly rather than silently producing a broken tag.
+
+Known: v0.2.3 is a broken tag (release exists but no binaries attached because all five platform
+  builds failed on the stale lockfile). The next release will be v0.2.4 and should be fully green
+  end-to-end.
+
+
 ## v0.2.3 (2026-04-17)
 
 ### Bug Fixes
