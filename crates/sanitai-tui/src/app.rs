@@ -355,8 +355,7 @@ impl App {
     fn run_scan_and_update(&mut self) {
         match run_auto_scan() {
             Ok(summary) => {
-                let total =
-                    summary.findings_high + summary.findings_medium + summary.findings_low;
+                let total = summary.findings_high + summary.findings_medium + summary.findings_low;
                 if total == 0 {
                     self.nix_mood = NixMood::Happy;
                     self.nix_speech = Some("Clean. Sleep well.".to_owned());
@@ -456,11 +455,20 @@ fn render_footer(area: Rect, buf: &mut Buffer, last_scan: Option<&str>) {
 
     let hints =
         "\u{2191}\u{2193}/jk navigate \u{2502} Enter select \u{2502} q quit \u{2502} ? help \u{2502} Esc quit";
-    buf.set_string(area.left(), area.top(), hints, Style::default().fg(COLOR_MUTED));
+    buf.set_string(
+        area.left(),
+        area.top(),
+        hints,
+        Style::default().fg(COLOR_MUTED),
+    );
 
     if let Some(label) = last_scan {
         let label_len = label.len() as u16;
-        if label_len.saturating_add(hints.len() as u16).saturating_add(4) < area.width {
+        if label_len
+            .saturating_add(hints.len() as u16)
+            .saturating_add(4)
+            < area.width
+        {
             let x = area.right().saturating_sub(label_len + 1);
             buf.set_string(x, area.top(), label, Style::default().fg(COLOR_FOCUS));
         }
@@ -477,7 +485,9 @@ fn render_scanning_screen(area: Rect, buf: &mut Buffer, nix_mood: NixMood) {
         area.left().saturating_add(2),
         area.top().saturating_add(y),
         msg,
-        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(COLOR_FOCUS)
+            .add_modifier(Modifier::BOLD),
     );
     buf.set_string(
         area.left().saturating_add(2),
@@ -531,7 +541,11 @@ pub fn run() -> Result<()> {
     let result = run_loop(&mut terminal, &mut app);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -567,7 +581,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
                         } else {
                             None
                         };
-                        let nix = NixWidget { mood: app.nix_mood, speech };
+                        let nix = NixWidget {
+                            mood: app.nix_mood,
+                            speech,
+                        };
                         nix.render(nix_area, buf);
                     }
 
@@ -630,9 +647,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
 #[cfg(test)]
 mod filter_tests {
     use super::ResultsFilter;
-    use sanitai_core::finding::{
-        Confidence, ContextClass, Finding, SpanKind, TransformChain,
-    };
+    use sanitai_core::finding::{Confidence, ContextClass, Finding, SpanKind, TransformChain};
     use sanitai_core::traits::Category;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -662,7 +677,10 @@ mod filter_tests {
         f2.context_class = ContextClass::Educational;
 
         let filter = ResultsFilter::default();
-        assert!(filter.matches(&f1), "RealPaste should be visible by default");
+        assert!(
+            filter.matches(&f1),
+            "RealPaste should be visible by default"
+        );
         assert!(
             !filter.matches(&f2),
             "Educational should be hidden by default"

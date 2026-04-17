@@ -127,8 +127,7 @@ fn scan_one(
 
     let claude_score =
         sniff_score(ClaudeJsonlParser::with_path(path.to_path_buf()).can_parse(&hint));
-    let chatgpt_score =
-        sniff_score(ChatGptParser::with_path(path.to_path_buf()).can_parse(&hint));
+    let chatgpt_score = sniff_score(ChatGptParser::with_path(path.to_path_buf()).can_parse(&hint));
 
     if claude_score == 0 && chatgpt_score == 0 {
         return Ok((Vec::new(), 0));
@@ -155,21 +154,19 @@ fn scan_one(
     let mut scratch = DetectorScratch::default();
     let mut turn_count = 0usize;
 
-    for turn_res in turns_result {
-        if let Ok(turn) = turn_res {
-            turn_count += 1;
-            for chunk in chunk_turn(&turn, chunker_cfg) {
-                // NOTE: reset_for_chunk() clears the per-chunk decode budget.
-                // The CLI does not call this (architectural debt tracked separately).
-                // Calling it here makes each chunk start with a clean decode budget,
-                // which is the intended behaviour of DetectorScratch.
-                scratch.reset_for_chunk();
-                for det in detectors {
-                    det.scan(&chunk, &mut scratch, &mut findings);
-                }
+    for turn in turns_result.into_iter().flatten() {
+        turn_count += 1;
+        for chunk in chunk_turn(&turn, chunker_cfg) {
+            // NOTE: reset_for_chunk() clears the per-chunk decode budget.
+            // The CLI does not call this (architectural debt tracked separately).
+            // Calling it here makes each chunk start with a clean decode budget,
+            // which is the intended behaviour of DetectorScratch.
+            scratch.reset_for_chunk();
+            for det in detectors {
+                det.scan(&chunk, &mut scratch, &mut findings);
             }
-            findings.extend(correlator.push_turn(&turn));
         }
+        findings.extend(correlator.push_turn(&turn));
     }
 
     Ok((findings, turn_count))

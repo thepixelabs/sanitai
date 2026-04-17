@@ -57,11 +57,7 @@ impl ConversationParser for CopilotParser {
     }
 
     fn can_parse(&self, hint: &SourceHint<'_>) -> Sniff {
-        let name = hint
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = hint.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let looks_copilot =
             name.contains("Copilot") && name.contains("Chat") && name.ends_with(".log");
         if looks_copilot {
@@ -138,7 +134,8 @@ impl<'a> Iterator for CopilotLineIter<'a> {
             let candidate = &trimmed[json_start..];
             // Use the streaming deserializer so trailing log garbage after
             // the JSON payload doesn't cause the whole line to be rejected.
-            let mut de = serde_json::Deserializer::from_str(candidate).into_iter::<serde_json::Value>();
+            let mut de =
+                serde_json::Deserializer::from_str(candidate).into_iter::<serde_json::Value>();
             let Some(Ok(value)) = de.next() else {
                 continue;
             };

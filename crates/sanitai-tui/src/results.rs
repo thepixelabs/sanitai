@@ -1,13 +1,15 @@
 use crate::app::ResultsFilter;
-use crate::menu::{COLOR_BG, COLOR_DANGER, COLOR_FG, COLOR_FOCUS, COLOR_MUTED, COLOR_SAFE, COLOR_WARN};
+use crate::menu::{
+    COLOR_BG, COLOR_DANGER, COLOR_FG, COLOR_FOCUS, COLOR_MUTED, COLOR_SAFE, COLOR_WARN,
+};
 use crate::scan_runner::ScanSummary;
-use sanitai_core::finding::Confidence;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::Widget,
 };
+use sanitai_core::finding::Confidence;
 use std::path::Path;
 
 // Pale yellow for LOW severity — one step softer than amber.
@@ -137,7 +139,9 @@ fn render_summary_bar(
                 let clipped = clip_str(s, available);
                 buf.set_string(x, y, clipped, $style);
                 #[allow(unused_assignments)]
-                { x = x.saturating_add(clipped.len() as u16); }
+                {
+                    x = x.saturating_add(clipped.len() as u16);
+                }
             }
         }};
     }
@@ -224,7 +228,9 @@ fn render_finding_row(
                 let clipped = clip_str(s, available);
                 buf.set_string(x, y, clipped, $style);
                 #[allow(unused_assignments)]
-                { x = x.saturating_add(clipped.len() as u16); }
+                {
+                    x = x.saturating_add(clipped.len() as u16);
+                }
             }
         }};
     }
@@ -245,10 +251,7 @@ fn render_finding_row(
 
     // Detector name: 22 chars, right-padded, truncated with ellipsis
     let detector = fixed_width(finding.detector_id, 22);
-    put!(
-        &detector,
-        Style::default().fg(COLOR_FG)
-    );
+    put!(&detector, Style::default().fg(COLOR_FG));
 
     put!(" ", Style::default().fg(COLOR_FG));
 

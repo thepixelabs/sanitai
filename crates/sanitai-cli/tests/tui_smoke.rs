@@ -84,8 +84,7 @@ fn tui_non_tty_stderr_mentions_terminal() {
         "sanitai tui on a non-TTY must exit 2; stderr: {stderr}"
     );
     assert!(
-        stderr.to_lowercase().contains("terminal")
-            || stderr.to_lowercase().contains("requires"),
+        stderr.to_lowercase().contains("terminal") || stderr.to_lowercase().contains("requires"),
         "stderr must explain that a terminal is required; got: {stderr}"
     );
 }
@@ -99,10 +98,7 @@ fn tui_non_tty_stderr_mentions_terminal() {
 #[test]
 fn help_output_lists_tui_subcommand() {
     let (stdout, stderr, code) = run_sanitai(&["--help"]);
-    assert_eq!(
-        code, 0,
-        "sanitai --help must exit 0; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "sanitai --help must exit 0; stderr: {stderr}");
     assert!(
         stdout.contains("tui"),
         "sanitai --help output must include the 'tui' subcommand; got:\n{stdout}"
@@ -119,19 +115,13 @@ fn help_output_lists_tui_subcommand() {
 #[test]
 fn tui_help_exits_zero() {
     let (_, stderr, code) = run_sanitai(&["tui", "--help"]);
-    assert_eq!(
-        code, 0,
-        "sanitai tui --help must exit 0; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "sanitai tui --help must exit 0; stderr: {stderr}");
 }
 
 #[test]
 fn tui_help_prints_usage() {
     let (stdout, stderr, code) = run_sanitai(&["tui", "--help"]);
-    assert_eq!(
-        code, 0,
-        "sanitai tui --help must exit 0; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "sanitai tui --help must exit 0; stderr: {stderr}");
     // clap always emits "Usage:" at minimum; this is the canonical marker.
     assert!(
         stdout.to_lowercase().contains("usage"),

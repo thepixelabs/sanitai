@@ -84,9 +84,12 @@ jobs:
 
       - name: Install zig + cargo-zigbuild (Linux cross targets)
         if: matrix.cross == true
+        # Pin cargo-zigbuild: 0.22+ requires rustc 1.88, but this repo is pinned
+        # to 1.87.0 via rust-toolchain.toml. Bump this in lockstep with the
+        # rustc version pin.
         run: |
           pip install ziglang
-          cargo install cargo-zigbuild --locked
+          cargo install cargo-zigbuild --version '^0.21' --locked
 
       - name: Build (Linux, cargo-zigbuild)
         if: matrix.cross == true

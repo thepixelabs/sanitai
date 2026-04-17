@@ -6,9 +6,7 @@ use ratatui::{
 };
 use sanitai_store::ScanRecord;
 
-use crate::menu::{
-    COLOR_BG, COLOR_DANGER, COLOR_FG, COLOR_FOCUS, COLOR_MUTED, COLOR_WARN,
-};
+use crate::menu::{COLOR_BG, COLOR_DANGER, COLOR_FG, COLOR_FOCUS, COLOR_MUTED, COLOR_WARN};
 
 // Low-severity finding color (yellow-ish, distinct from amber warn)
 const COLOR_LOW: ratatui::style::Color = ratatui::style::Color::Indexed(228);
@@ -211,9 +209,7 @@ fn render_title(area: Rect, buf: &mut Buffer, total: usize) {
 
     // Right-align the count.
     let count_str = format!("{} scans  ", total);
-    let count_x = area
-        .right()
-        .saturating_sub(count_str.len() as u16);
+    let count_x = area.right().saturating_sub(count_str.len() as u16);
     if count_x > area.left().saturating_add(title.len() as u16) {
         buf.set_string(
             count_x,
@@ -227,7 +223,12 @@ fn render_title(area: Rect, buf: &mut Buffer, total: usize) {
 fn render_filter_bar(area: Rect, buf: &mut Buffer, filter: &str, filtering: bool) {
     if filtering {
         let text = format!("  Filter: [{}_]", filter);
-        buf.set_string(area.left(), area.top(), &text, Style::default().fg(COLOR_FG));
+        buf.set_string(
+            area.left(),
+            area.top(),
+            &text,
+            Style::default().fg(COLOR_FG),
+        );
     } else {
         let hints = "  / filter  \u{00b7}  j/k scroll  \u{00b7}  Enter select  \u{00b7}  q back";
         buf.set_string(
@@ -286,7 +287,12 @@ fn render_row(area: Rect, buf: &mut Buffer, rec: &ScanRecord, y: u16, selected: 
     // Highlight the whole row when selected.
     if selected {
         buf.set_style(
-            Rect { x: area.left(), y, width: area.width, height: 1 },
+            Rect {
+                x: area.left(),
+                y,
+                width: area.width,
+                height: 1,
+            },
             Style::default().bg(ratatui::style::Color::Indexed(235)),
         );
     }

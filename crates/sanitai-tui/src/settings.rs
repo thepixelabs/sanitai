@@ -126,12 +126,16 @@ impl Widget for &mut SettingsScreen {
         // --- Tab bar ---
         if row < area.bottom() {
             let general_style = if self.active_tab == SettingsTab::General {
-                Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(COLOR_FOCUS)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(COLOR_MUTED)
             };
             let rules_style = if self.active_tab == SettingsTab::Rules {
-                Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(COLOR_FOCUS)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(COLOR_MUTED)
             };
@@ -147,12 +151,7 @@ impl Widget for &mut SettingsScreen {
         // --- Separator ---
         if row < area.bottom() {
             let sep = "\u{2500}".repeat(area.width as usize);
-            buf.set_string(
-                area.left(),
-                row,
-                &sep,
-                Style::default().fg(COLOR_MUTED),
-            );
+            buf.set_string(area.left(), row, &sep, Style::default().fg(COLOR_MUTED));
             row += 1;
         }
 
@@ -183,13 +182,7 @@ impl Widget for &mut SettingsScreen {
     }
 }
 
-fn render_general(
-    screen: &SettingsScreen,
-    left: u16,
-    top: u16,
-    bottom: u16,
-    buf: &mut Buffer,
-) {
+fn render_general(screen: &SettingsScreen, left: u16, top: u16, bottom: u16, buf: &mut Buffer) {
     let items: &[(&str, bool)] = &[
         ("Show mascot   ", screen.settings.show_mascot),
         ("Mascot speech ", screen.settings.mascot_speech),
@@ -209,7 +202,10 @@ fn render_general(
         let value_str = if *value { "[on ]" } else { "[off]" };
         let value_style = Style::default().fg(if *value { COLOR_SAFE } else { COLOR_MUTED });
 
-        let label_style = Style::default().fg(if is_selected { COLOR_FG } else { COLOR_FG });
+        // Label color is intentionally the same whether selected or not — the
+        // arrow prefix already indicates selection; dimming the label here hurt
+        // readability. Keep the constant explicit for future theming work.
+        let label_style = Style::default().fg(COLOR_FG);
 
         let x = left + 4;
 

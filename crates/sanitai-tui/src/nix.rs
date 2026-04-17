@@ -5,17 +5,17 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::menu::{COLOR_BG, COLOR_FOCUS, COLOR_FG, COLOR_WARN};
+use crate::menu::{COLOR_BG, COLOR_FG, COLOR_FOCUS, COLOR_WARN};
 
 // ── Raccoon sprite palette ──────────────────────────────────────────────────
 // Three-step warm fur: ivory highlight → amber midtone → burnt-orange shadow.
 // Combined with a near-black bandit mask, they give the JRPG zone-shading
 // depth effect without needing per-cell half-block styling.
-const FUR_HI: Color = Color::Indexed(223);  // ivory — snout / chest highlight
+const FUR_HI: Color = Color::Indexed(223); // ivory — snout / chest highlight
 const FUR_MID: Color = Color::Indexed(179); // amber tan — main body fur
-const FUR_SH: Color = Color::Indexed(130);  // burnt orange — ears / shaded zones
-const MASK: Color = Color::Indexed(235);    // near-black — bandit eye mask
-const DIM: Color = Color::Indexed(238);     // medium gray — sleeping state
+const FUR_SH: Color = Color::Indexed(130); // burnt orange — ears / shaded zones
+const MASK: Color = Color::Indexed(235); // near-black — bandit eye mask
+const DIM: Color = Color::Indexed(238); // medium gray — sleeping state
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum NixMood {
@@ -170,10 +170,7 @@ impl Widget for &NixWidget {
             let bx = area.left();
 
             // Top border ╭──────╮
-            let top = format!(
-                "\u{256d}{}\u{256e}",
-                "\u{2500}".repeat(display.len() + 2)
-            );
+            let top = format!("\u{256d}{}\u{256e}", "\u{2500}".repeat(display.len() + 2));
             buf.set_string(bx, area.top(), &top, Style::default().fg(COLOR_FOCUS));
 
             // Text line │ text │
@@ -186,10 +183,7 @@ impl Widget for &NixWidget {
             );
 
             // Bottom border ╰──────╯
-            let bot = format!(
-                "\u{2570}{}\u{256f}",
-                "\u{2500}".repeat(display.len() + 2)
-            );
+            let bot = format!("\u{2570}{}\u{256f}", "\u{2500}".repeat(display.len() + 2));
             buf.set_string(
                 bx,
                 area.top().saturating_add(2),

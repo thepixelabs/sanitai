@@ -212,6 +212,7 @@ pub fn findings_to_sarif(findings: &[Finding], tool_version: &str) -> SarifLog {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use sanitai_core::finding::{SpanKind, TransformChain};

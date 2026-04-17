@@ -22,6 +22,12 @@ pub struct Menu {
     pub state: ratatui::widgets::ListState,
 }
 
+impl Default for Menu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Menu {
     pub fn new() -> Self {
         let items = vec![

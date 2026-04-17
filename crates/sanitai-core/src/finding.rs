@@ -3,20 +3,15 @@ use crate::turn::{Role, TurnId};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextClass {
+    #[default]
     Unclassified,
     RealPaste,
     Educational,
     DocumentationQuote,
     ModelHallucination,
-}
-
-impl Default for ContextClass {
-    fn default() -> Self {
-        ContextClass::Unclassified
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -57,8 +57,8 @@ fn compute_secret_hash(secret: &str, installation_key: &[u8]) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(installation_key)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(installation_key).expect("HMAC accepts any key length");
     mac.update(secret.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -346,11 +346,7 @@ mod tests {
         store
             .conn
             .borrow()
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table}"),
-                [],
-                |r| r.get(0),
-            )
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
             .unwrap()
     }
 
@@ -421,10 +417,16 @@ mod tests {
 
         // Verify all findings and files were actually persisted — `recent_scans`
         // does not return them, so we check the raw tables.
-        assert_eq!(raw_count(&store, "findings"), 3,
-            "all 3 FindingRecords should be in the findings table");
-        assert_eq!(raw_count(&store, "scan_files"), 2,
-            "both file paths should be in the scan_files table");
+        assert_eq!(
+            raw_count(&store, "findings"),
+            3,
+            "all 3 FindingRecords should be in the findings table"
+        );
+        assert_eq!(
+            raw_count(&store, "scan_files"),
+            2,
+            "both file paths should be in the scan_files table"
+        );
     }
 
     #[test]
@@ -463,10 +465,16 @@ mod tests {
 
         // Cascade must have removed child rows — if foreign_keys pragma were
         // absent, these rows would silently survive.
-        assert_eq!(raw_count(&store, "scan_files"), 0,
-            "ON DELETE CASCADE should have removed scan_files rows");
-        assert_eq!(raw_count(&store, "findings"), 0,
-            "ON DELETE CASCADE should have removed findings rows");
+        assert_eq!(
+            raw_count(&store, "scan_files"),
+            0,
+            "ON DELETE CASCADE should have removed scan_files rows"
+        );
+        assert_eq!(
+            raw_count(&store, "findings"),
+            0,
+            "ON DELETE CASCADE should have removed findings rows"
+        );
     }
 
     #[test]
@@ -573,10 +581,13 @@ mod tests {
 
         let t = store.totals().unwrap();
         assert_eq!(t.total_scans, 3);
-        assert_eq!(t.clean_scans, 1, "only the scan with all-zero findings is clean");
-        assert_eq!(t.total_findings_high, 3,   "2 + 1");
+        assert_eq!(
+            t.clean_scans, 1,
+            "only the scan with all-zero findings is clean"
+        );
+        assert_eq!(t.total_findings_high, 3, "2 + 1");
         assert_eq!(t.total_findings_medium, 3, "0 + 3");
-        assert_eq!(t.total_findings_low, 1,    "0 + 1");
+        assert_eq!(t.total_findings_low, 1, "0 + 1");
     }
 
     /// Opening the same path twice must not fail.
