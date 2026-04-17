@@ -36,9 +36,15 @@ jobs:
       # semantic-release runs `cargo update --workspace` as build_command to
       # keep Cargo.lock in sync with the bumped workspace version. Match the
       # toolchain pin used everywhere else so the lockfile format is stable.
+      # Components here must match rust-toolchain.toml exactly, otherwise the
+      # first `cargo` invocation tries to install the missing components from
+      # rust-toolchain.toml and races with what dtolnay already installed,
+      # producing a "detected conflict: bin/cargo-clippy" and failing silently
+      # inside the build_command.
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.87.0"
+          components: rustfmt, clippy, rust-src
 
       - name: Cache pip downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
