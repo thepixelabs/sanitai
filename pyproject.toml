@@ -14,8 +14,9 @@ changelog_file = "CHANGELOG.md"
 #
 # NOTE: python-semantic-release will not auto-stage files modified by
 # build_command — we must `git add` the lockfile explicitly here so it is
-# picked up by the version-bump commit.
-build_command = "cargo update --workspace --offline || cargo update --workspace; git add Cargo.lock"
+# picked up by the version-bump commit. `set -e` ensures a failed cargo
+# update aborts the release rather than producing a tag with stale lockfile.
+build_command = "set -e && cargo update --workspace && git add Cargo.lock"
 
 [tool.semantic_release.commit_parser_options]
 # Release rules mirror altergo's config:
