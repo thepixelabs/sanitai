@@ -281,7 +281,12 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    # SLSA v2.0.0's "final" reporter step exits 27 when upload-assets=false,
+    # which would block this job. Depend on SLSA's outcome with `always()`
+    # so the release still publishes even if provenance reporting fails.
+    # We download the provenance artifact opportunistically below.
     needs: [build, sign, provenance, sbom]
+    if: always() && needs.build.result == 'success' && needs.sign.result == 'success' && needs.sbom.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
