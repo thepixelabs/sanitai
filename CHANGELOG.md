@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.2.8 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Ignore correct RUSTSEC ids for atty and paste
+  ([`56e99ec`](https://github.com/thepixelabs/sanitai/commit/56e99ec55588565c112ec2acad5eaf94bbe9c145))
+
+The ids in the previous commit were wrong (copy-paste from a stale list). The advisories actually
+  flagged by cargo-deny 0.19.2 are:
+
+RUSTSEC-2021-0145 — atty unaligned read (Windows + custom allocator only) RUSTSEC-2024-0436 — paste
+  proc-macro unmaintained (transitive via ratatui)
+
+Neither is reachable in our build. Replace the placeholder ids with the real ones so cargo-deny
+  stops emitting "no crate matched advisory criteria" and advisory errors.
+
+
 ## v0.2.7 (2026-04-18)
 
 ### Bug Fixes
