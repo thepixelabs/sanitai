@@ -14,17 +14,15 @@ db-path    = "~/.cargo/advisory-db"
 db-urls    = ["https://github.com/rustsec/advisory-db"]
 yanked     = "deny"
 ignore = [
-  # atty is unmaintained (RUSTSEC-2024-0375). Pulled in transitively.
-  # We use std::io::IsTerminal directly; plan is to drop `atty` from
-  # workspace.dependencies in a follow-up.
-  "RUSTSEC-2024-0375",
-  # `rand` 0.8.5 unsound only when a custom `log` logger calls
-  # `rand::rng()` (RUSTSEC-2026-0097). SanitAI does not install a custom
-  # logger — this advisory is not reachable in our call graph.
-  "RUSTSEC-2026-0097",
-  # `rand_core` potential unaligned read advisory — same 0.8 tree as
-  # `rand` above; not reachable here.
-  "RUSTSEC-2024-0399",
+  # `atty` has a potential unaligned read (RUSTSEC-2021-0145). Only
+  # triggered on Windows + a custom global allocator, neither of which
+  # applies to SanitAI. Follow-up: drop `atty` in favour of
+  # `std::io::IsTerminal` now that MSRV >= 1.70.
+  "RUSTSEC-2021-0145",
+  # `paste` proc-macro is unmaintained (RUSTSEC-2024-0436). Pulled in
+  # transitively by ratatui; no security impact, no drop-in replacement
+  # yet. Revisit when ratatui upgrades its macro stack.
+  "RUSTSEC-2024-0436",
 ]
 
 [licenses]
