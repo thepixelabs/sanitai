@@ -101,6 +101,6 @@ jobs:
       # macOS where the container runtime isn't available.
       - name: cargo-deny
         if: runner.os == 'Linux'
-        uses: EmbarkStudios/cargo-deny-action@ef301417264190a1eb9f26fcf171642070085c5b # v1
+        uses: EmbarkStudios/cargo-deny-action@a4d2d701318fdc1c6ae17ba8cea8f329c5110eb2 # v2.0.17
         with:
           command: check
