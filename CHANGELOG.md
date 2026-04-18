@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v0.2.6 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Upgrade cargo-deny-action to v2.0.17 for CVSS 4.0 support
+  ([`d451439`](https://github.com/thepixelabs/sanitai/commit/d451439ecb8fd83b443f1fca406768ed5eaa5ef2))
+
+The old action (v1 / cargo-deny 0.14.21) could not parse newer RUSTSEC advisories that use CVSS
+  v4.0, producing:
+
+failed to load advisory database: parse error: ... unsupported CVSS version: 4.0
+
+Bump to EmbarkStudios/cargo-deny-action@v2.0.17, which bundles cargo-deny 0.19.2 with CVSS 4.0
+  support, and migrate deny.toml to the v2 schema:
+
+- [advisories]: drop removed keys (vulnerability, notice). Vulnerability advisories always error;
+  warnings are promoted via `version = 2`. - [licenses]: drop removed keys (unlicensed, copyleft,
+  deny). Anything not in `allow` is rejected by default, so copyleft licenses stay out implicitly.
+
+
 ## v0.2.5 (2026-04-17)
 
 ### Bug Fixes
