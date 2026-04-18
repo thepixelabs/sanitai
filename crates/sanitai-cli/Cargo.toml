@@ -2,6 +2,8 @@
 name    = "sanitai-cli"
 version.workspace = true
 edition = "2021"
+publish.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "sanitai"

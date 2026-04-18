@@ -2,6 +2,8 @@
 name    = "sanitai-parsers"
 version.workspace = true
 edition = "2021"
+publish.workspace = true
+license.workspace = true
 
 [dependencies]
 sanitai-core = { path = "../sanitai-core" }
