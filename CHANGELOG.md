@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.2.11 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Make homebrew-tap bump formula audit-strict compliant
+  ([`bb266e4`](https://github.com/thepixelabs/sanitai/commit/bb266e43db3678bf519525b23812e75e964df03c))
+
+Replace the old sed-based formula patcher with a Python script that: - Strips any explicit `version`
+  stanza (Homebrew parses version from the archive filename; an explicit stanza alongside a
+  parseable URL triggers "version X.Y.Z is redundant with version scanned from URL" which fails brew
+  audit --strict and blocks the auto-merge gate). - Rewrites the old version token in every URL
+  segment — handles both the original #{version} Ruby interpolation form and hardcoded semver from a
+  previous bump, so the script is idempotent regardless of formula state. - Preserves the existing
+  sha256-update logic unchanged.
+
+
 ## v0.2.10 (2026-04-18)
 
 ### Bug Fixes

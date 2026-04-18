@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.10"
+version = "0.2.11"
 # Internal crates are not published to crates.io; sanitai ships as a single
 # binary built from the `sanitai-cli` crate. Marking every workspace member
 # `publish = false` also lets cargo-deny's `licenses.private.ignore = true`
