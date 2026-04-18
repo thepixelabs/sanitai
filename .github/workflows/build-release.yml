@@ -410,17 +410,43 @@ jobs:
           SHA_LINUX_ARM64: ${{ needs.release.outputs.sha_linux_arm64 }}
         run: |
           cd tap
-          FILE="Formula/sanitai.rb"
-          # Update version
-          sed -i -E "s|^(  version )\".*\"|\\1\"${VERSION}\"|" "$FILE"
-          # Update URLs (version embedded in URL)
-          OLD_VERSION=$(grep -oP 'sanitai-\K[0-9]+\.[0-9]+\.[0-9]+' "$FILE" | head -1)
-          sed -i "s|sanitai-${OLD_VERSION}-|sanitai-${VERSION}-|g" "$FILE"
-          # Update sha256 values by target order (macos arm64, macos x64, linux arm64, linux x64)
+          # Update URLs (version embedded in URL path and archive name).
+          # The formula does NOT use an explicit `version` stanza — Homebrew
+          # parses the version from the archive filename automatically. An
+          # explicit `version` alongside a parseable URL triggers:
+          #   "version X.Y.Z is redundant with version scanned from URL"
+          # which fails `brew audit --strict` and blocks the auto-merge gate.
           python3 - <<'PYEOF'
           import re, os
           file = "Formula/sanitai.rb"
           content = open(file).read()
+
+          version = os.environ["VERSION"]
+
+          # Strip any explicit `version` stanza — Homebrew parses the version
+          # from the archive filename automatically. An explicit `version`
+          # alongside a parseable URL triggers:
+          #   "version X.Y.Z is redundant with version scanned from URL"
+          # which fails `brew audit --strict` and blocks the auto-merge gate.
+          content = re.sub(r'^\s*version\s+"[^"]*"\n', '', content, flags=re.MULTILINE)
+
+          # Replace the old version in every URL (both the /vX.Y.Z/ path
+          # segment and the sanitai-X.Y.Z- archive name component).
+          # The version token may be a literal semver (e.g. from a previous
+          # hardcoded bump) or the Ruby interpolation #{version} (the original
+          # form on tap/main). Both forms are matched and replaced.
+          VERSION_PAT = r'(?:[0-9]+\.[0-9]+\.[0-9]+|#\{version\})'
+          content = re.sub(
+            r'(releases/download/v)' + VERSION_PAT + r'(/)',
+            r'\g<1>' + version + r'\2',
+            content
+          )
+          content = re.sub(
+            r'(sanitai-)' + VERSION_PAT + r'(-)',
+            r'\g<1>' + version + r'\2',
+            content
+          )
+
           shas = {
             "aarch64-apple-darwin":      os.environ["SHA_MACOS_ARM64"],
             "x86_64-apple-darwin":       os.environ["SHA_MACOS_X64"],
