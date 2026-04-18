@@ -373,6 +373,11 @@ jobs:
   bump-tap:
     name: Open version-bump PR against homebrew-tap
     needs: release
+    # The `release` job above uses `if: always() && ...` so it can publish
+    # even when the SLSA final-reporter step exits 27. Without matching
+    # `always()` here, GitHub marks this downstream job skipped because
+    # some transitive upstream (SLSA provenance/final) failed.
+    if: always() && needs.release.result == 'success'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
