@@ -2,6 +2,8 @@
 name    = "sanitai-core"
 version.workspace = true
 edition = "2021"
+publish.workspace = true
+license.workspace = true
 
 [dependencies]
 thiserror  = { workspace = true }

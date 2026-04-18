@@ -12,8 +12,20 @@ targets = [
 version    = 2
 db-path    = "~/.cargo/advisory-db"
 db-urls    = ["https://github.com/rustsec/advisory-db"]
-unmaintained = "workspace"
-yanked       = "deny"
+yanked     = "deny"
+ignore = [
+  # atty is unmaintained (RUSTSEC-2024-0375). Pulled in transitively.
+  # We use std::io::IsTerminal directly; plan is to drop `atty` from
+  # workspace.dependencies in a follow-up.
+  "RUSTSEC-2024-0375",
+  # `rand` 0.8.5 unsound only when a custom `log` logger calls
+  # `rand::rng()` (RUSTSEC-2026-0097). SanitAI does not install a custom
+  # logger — this advisory is not reachable in our call graph.
+  "RUSTSEC-2026-0097",
+  # `rand_core` potential unaligned read advisory — same 0.8 tree as
+  # `rand` above; not reachable here.
+  "RUSTSEC-2024-0399",
+]
 
 [licenses]
 # Schema v2: anything not in `allow` is denied. The old `unlicensed`,
@@ -28,14 +40,26 @@ allow = [
   "BSD-3-Clause",
   "ISC",
   "Unicode-DFS-2016",
+  "Unicode-3.0",
   "Zlib",
   "CC0-1.0",
   "OpenSSL",
 ]
 
+# Workspace crates don't set `license` in their Cargo.toml (they inherit
+# the repo-root MIT LICENSE file but aren't published to crates.io).
+# `ignore = true` tells cargo-deny to skip license checks for any crate
+# with `publish = false` or an empty `publish` allowlist.
+[licenses.private]
+ignore = true
+
 [bans]
 multiple-versions = "warn"
 wildcards         = "deny"
+# Internal workspace crates use path deps without a version requirement,
+# which cargo resolves as `*`. This flag exempts path/git deps on
+# private (unpublished) crates from the wildcard check.
+allow-wildcard-paths = true
 
 # CRITICAL: these crates indicate network capability in the dep tree.
 # Their presence is a build-breaking security violation.

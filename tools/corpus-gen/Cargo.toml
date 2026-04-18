@@ -2,7 +2,8 @@
 name    = "corpus-gen"
 version.workspace = true
 edition = "2021"
-publish = false
+publish.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "corpus-gen"

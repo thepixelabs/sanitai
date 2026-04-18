@@ -2,6 +2,8 @@
 name    = "sanitai-fixtures"
 version.workspace = true
 edition = "2021"
+publish.workspace = true
+license.workspace = true
 
 # This crate is only for dev/test use — never a runtime dependency
 [dev-dependencies]
