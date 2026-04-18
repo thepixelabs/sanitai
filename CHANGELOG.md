@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.2.9 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Ignore remaining unmaintained/unsound advisories
+  ([`0f43da9`](https://github.com/thepixelabs/sanitai/commit/0f43da93593029d93299bafc8c6b26302cb2ae42))
+
+cargo-deny surfaced three more advisories after the previous ignore-list update:
+
+RUSTSEC-2024-0375 — atty unmaintained (separate from 2021-0145 unsound) RUSTSEC-2026-0097 — rand
+  custom-logger unsoundness (not reachable)
+
+Both atty advisories are mitigated by switching to std::io::IsTerminal in a follow-up; neither
+  applies to our runtime today. rand 2026-0097 is only triggered by a custom log::Logger that calls
+  rand::rng() — we don't install one.
+
+
 ## v0.2.8 (2026-04-18)
 
 ### Bug Fixes
