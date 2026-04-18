@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v0.2.7 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Migrate cargo-deny config to v2 schema and mark workspace private
+  ([`123283b`](https://github.com/thepixelabs/sanitai/commit/123283b5b3d223f23bbb27f2d807b10704ef78b6))
+
+cargo-deny 0.19.2 (bundled in cargo-deny-action v2.0.17) enforces the new schema strictly: every
+  advisory key now fails rather than warns, and the old `[licenses] unlicensed/copyleft/deny` keys
+  were removed. Without these fixes the advisory-db check errors on:
+
+- workspace crates reporting "unlicensed" (no license field in Cargo.toml and not marked private) -
+  internal path deps flagged as wildcard (version = "*") - unmaintained/unsound advisories for atty,
+  rand, rand_core
+
+Changes: - Cargo.toml: add `publish = false` and `license = "MIT"` to [workspace.package] so every
+  member inherits the repo-root MIT LICENSE and is recognised by cargo-deny as private. - All
+  crates/*/Cargo.toml and tools/*/Cargo.toml: inherit publish and license from the workspace via
+  `.workspace = true`. - deny.toml: set `[licenses.private] ignore = true` and `[bans]
+  allow-wildcard-paths = true`. Ignore three RUSTSEC advisories that are not reachable in our call
+  graph (atty deprecation, rand custom-logger unsoundness, rand_core unaligned-read corner case).
+  Follow-up: drop `atty` in favour of `std::io::IsTerminal`.
+
+
 ## v0.2.6 (2026-04-18)
 
 ### Bug Fixes
