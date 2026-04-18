@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.2.10 (2026-04-18)
+
+### Bug Fixes
+
+- **ci**: Unblock homebrew-tap bump job from transitive SLSA failure
+  ([`25275ea`](https://github.com/thepixelabs/sanitai/commit/25275ea353fe8b4ba0f59c2db5bc8c90ff43361f))
+
+The release job runs with `if: always() && ...` so it publishes even when SLSA's final-reporter step
+  exits 27. Without the same `always()` guard on bump-tap, GitHub marks it skipped because a
+  transitive upstream (SLSA provenance/final) failed — so homebrew-tap has never received a
+  version-bump PR.
+
+Match the release job's gate so bump-tap runs whenever the release was actually published,
+  regardless of the SLSA reporter quirk.
+
+
 ## v0.2.9 (2026-04-18)
 
 ### Bug Fixes
