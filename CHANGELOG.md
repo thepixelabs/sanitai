@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.2.12 (2026-04-19)
+
+### Bug Fixes
+
+- Replace unmaintained atty crate with std::io::IsTerminal
+  ([`df5584c`](https://github.com/thepixelabs/sanitai/commit/df5584c617f6858557a95aae71531ddab67a23ee))
+
+Drops the `atty` dependency in favour of the stdlib `IsTerminal` trait (stable since Rust 1.70).
+  Closes RUSTSEC-2024-0375 (crate unmaintained) and RUSTSEC-2021-0145 (potential unaligned read on
+  Windows + custom allocator). Removes both advisories from the cargo-deny ignore list. No behavior
+  change: TTY detection on stdin/stdout is preserved byte-for-byte.
+
+
 ## v0.2.11 (2026-04-18)
 
 ### Bug Fixes
