@@ -209,46 +209,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  provenance-hashes:
-    name: Collect hashes for provenance
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      hashes: ${{ steps.hashes.outputs.hashes }}
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: dist
-          pattern: release-*
-          merge-multiple: true
-      - name: Generate base64-encoded SHA-256 manifest
-        id: hashes
-        run: |
-          cd dist
-          HASHES=$(sha256sum *.tar.gz | base64 -w0)
-          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
-
-  provenance:
-    name: SLSA provenance
-    needs: provenance-hashes
-    permissions:
-      id-token: write
-      contents: write
-      actions: read
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
-    with:
-      base64-subjects: ${{ needs.provenance-hashes.outputs.hashes }}
-      # upload-assets: true would have SLSA upload provenance.intoto.jsonl to
-      # the GitHub release — but the release does not exist yet at this point
-      # (the `release` job below creates it). Leaving this false keeps
-      # provenance as a workflow artifact; the release job downloads and
-      # uploads it with the rest of the artifacts so everything ships
-      # together on the tagged release.
-      upload-assets: false
-
   sbom:
     name: Generate SBOM
     needs: build
@@ -281,12 +241,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    # SLSA v2.0.0's "final" reporter step exits 27 when upload-assets=false,
-    # which would block this job. Depend on SLSA's outcome with `always()`
-    # so the release still publishes even if provenance reporting fails.
-    # We download the provenance artifact opportunistically below.
-    needs: [build, sign, provenance, sbom]
-    if: always() && needs.build.result == 'success' && needs.sign.result == 'success' && needs.sbom.result == 'success'
+    needs: [build, sign, sbom]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -328,16 +283,6 @@ jobs:
           name: sbom
           path: dist
 
-      # SLSA generator publishes provenance.intoto.jsonl as an artifact whose
-      # name equals the release tag (e.g. `v0.2.2.intoto.jsonl`). Using a
-      # glob pattern keeps this resilient to any future renames.
-      - name: Download SLSA provenance
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: dist
-          pattern: "*.intoto.jsonl"
-          merge-multiple: true
-
       - name: Export per-target SHA-256 outputs
         id: shas
         run: |
@@ -364,20 +309,13 @@ jobs:
             gh release create "$TAG" --generate-notes --verify-tag
           fi
           cd dist
-          # Provenance glob is optional — SLSA may or may not have produced
-          # files depending on matrix outcome. Expand only what exists.
           shopt -s nullglob
-          FILES=( *.tar.gz *.sha256 *.sig *.cert sbom.cyclonedx.json *.intoto.jsonl )
+          FILES=( *.tar.gz *.sha256 *.sig *.cert sbom.cyclonedx.json )
           gh release upload "$TAG" "${FILES[@]}" --clobber
 
   bump-tap:
     name: Open version-bump PR against homebrew-tap
     needs: release
-    # The `release` job above uses `if: always() && ...` so it can publish
-    # even when the SLSA final-reporter step exits 27. Without matching
-    # `always()` here, GitHub marks this downstream job skipped because
-    # some transitive upstream (SLSA provenance/final) failed.
-    if: always() && needs.release.result == 'success'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
