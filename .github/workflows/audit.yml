@@ -24,7 +24,7 @@ jobs:
           cargo install cargo-audit --locked
           cargo audit
       - name: cargo deny
-        uses: EmbarkStudios/cargo-deny-action@ef301417264190a1eb9f26fcf171642070085c5b # v1
+        uses: EmbarkStudios/cargo-deny-action@a4d2d701318fdc1c6ae17ba8cea8f329c5110eb2 # v2.0.17
       - name: Notify on failure
         if: failure()
         run: echo "Audit failed — check GitHub Actions for details"
