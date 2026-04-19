@@ -51,6 +51,9 @@ dist/
 vedox/
 generate_nix.py
 
+# Local MCP server config (per-developer, references localhost)
+.mcp.json
+
 # Cryptographic key material and certificates
 *.pem
 *.key
