@@ -1,7 +1,7 @@
 //! Non-interactive smoke tests for the `sanitai tui` subcommand.
 //!
 //! The TUI requires a real TTY for meaningful operation. These tests verify the
-//! guard rails that protect non-TTY environments: the atty check in `run_tui`,
+//! guard rails that protect non-TTY environments: the TTY check in `run_tui`,
 //! the subcommand registration in clap, and the `--help` short-circuit path
 //! that must exit without launching the TUI even when invoked in CI.
 //!
@@ -59,14 +59,14 @@ fn run_sanitai(args: &[&str]) -> (String, String, i32) {
 }
 
 // ---------------------------------------------------------------------------
-// atty guard — non-TTY stdin/stdout must be rejected
+// TTY guard — non-TTY stdin/stdout must be rejected
 // ---------------------------------------------------------------------------
 
 /// `sanitai tui` run with piped stdout (not a TTY) must exit 2 and emit a
 /// message containing "requires" on stderr.
 ///
 /// `Command::output()` always pipes stdout/stdin, so no extra redirection is
-/// needed. The atty guard in `run_tui` must fire before ratatui is initialised.
+/// needed. The TTY guard in `run_tui` must fire before ratatui is initialised.
 #[test]
 fn tui_non_tty_exits_with_code_2() {
     let (_, stderr, code) = run_sanitai(&["tui"]);
@@ -111,7 +111,7 @@ fn help_output_lists_tui_subcommand() {
 
 /// `sanitai tui --help` must exit 0 and print usage text without ever
 /// invoking `run_tui`. Clap intercepts `--help` before any command handler
-/// runs, so the atty guard must never be reached.
+/// runs, so the TTY guard must never be reached.
 #[test]
 fn tui_help_exits_zero() {
     let (_, stderr, code) = run_sanitai(&["tui", "--help"]);
@@ -131,7 +131,7 @@ fn tui_help_prints_usage() {
 
 /// `sanitai tui --help` must not emit "requires a terminal" on stderr.
 ///
-/// If the atty guard fires before `--help` is handled, it means the command
+/// If the TTY guard fires before `--help` is handled, it means the command
 /// handler is being called before clap has processed help flags — a bug.
 #[test]
 fn tui_help_does_not_trigger_tty_guard() {

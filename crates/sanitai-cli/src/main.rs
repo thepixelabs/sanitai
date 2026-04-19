@@ -918,9 +918,10 @@ fn do_redact(args: RedactArgs) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn run_tui() -> i32 {
+    use std::io::IsTerminal;
     // Verify we are actually on a TTY before launching the TUI.
     // If stdout is piped, ratatui will produce garbage output.
-    if !atty::is(atty::Stream::Stdout) || !atty::is(atty::Stream::Stdin) {
+    if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
         eprintln!("sanitai: the TUI requires an interactive terminal. Use `sanitai scan` for non-interactive use.");
         return 2;
     }

@@ -78,7 +78,6 @@ getrandom = "0.2"
 # TUI
 ratatui   = "0.28"
 crossterm = { version = "0.27", features = ["event-stream"] }
-atty      = "0.2"
 
 # Property-based testing
 proptest = "1"
