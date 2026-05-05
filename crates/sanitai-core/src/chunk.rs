@@ -57,6 +57,10 @@ pub struct Chunk<'a> {
     pub is_message_start: bool,
     /// Provenance for attributing findings back to their source turn.
     pub turn_id: TurnId,
+    /// 1-based line number in the originating source file where this chunk's
+    /// turn begins, when known. Carried so detectors can stamp findings with
+    /// a useful editor jump target without the caller doing a post-pass.
+    pub line_in_file: Option<u32>,
 }
 
 /// Per-thread scratch space reused across chunk scans.

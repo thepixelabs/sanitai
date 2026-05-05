@@ -44,6 +44,25 @@ pub fn stopwords() -> &'static HashSet<&'static str> {
             "yyyyyyyyyyy",
             "YYYYYYYYYYY",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            // Provider-doc placeholder fills — extend as needed.
+            // These are exact-match suppressors for low-specificity rules
+            // (anything with `use_stopwords: true`).
+            "00000000000000000000000000000000",
+            "11111111111111111111111111111111",
+            "ffffffffffffffffffffffffffffffff",
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            "deadbeefdeadbeefdeadbeefdeadbeef",
+            "0123456789abcdef0123456789abcdef",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",         // 32 x's
+            "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",         // 32 X's
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",    // 37 x's (Cloudflare global key shape)
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // 40 x's (Cloudflare token shape)
+            "xxxxxxxxxxxxxxxxxxxxxxxx",                 // 24 x's (Atlassian/Vercel shape)
+            "your_cloudflare_api_token_here_xxxxxxxxx",
+            "<YOUR_CLOUDFLARE_API_TOKEN>",
+            "<YOUR_ATLASSIAN_TOKEN>",
+            "<YOUR_ALGOLIA_API_KEY>",
+            "<YOUR_ASANA_TOKEN>",
             // Gitleaks stopwords appropriate for conversations
             "adafruit",
             "documentation",

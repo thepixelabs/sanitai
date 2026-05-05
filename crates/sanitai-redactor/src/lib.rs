@@ -228,8 +228,11 @@ mod tests {
     use std::sync::Arc;
 
     fn make_finding(detector_id: &'static str, start: usize, end: usize, raw: &str) -> Finding {
+        let path = PathBuf::from("/tmp/t");
+        let fingerprint =
+            sanitai_core::finding::compute_fingerprint(raw.as_bytes(), detector_id, &path, 0);
         Finding {
-            turn_id: (Arc::new(PathBuf::from("/tmp/t")), 0),
+            turn_id: (Arc::new(path), 0),
             detector_id,
             byte_range: start..end,
             matched_raw: raw.to_string(),
@@ -241,6 +244,9 @@ mod tests {
             category: sanitai_core::Category::Secret,
             entropy_score: 0.0,
             context_class: sanitai_core::ContextClass::Unclassified,
+            fingerprint,
+            line_in_file: None,
+            excerpt: String::new(),
         }
     }
 

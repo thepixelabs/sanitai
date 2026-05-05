@@ -212,6 +212,10 @@ fn walk_value(
                         conversation_id: Some(conversation_key.to_owned()),
                         timestamp: None,
                         model: None,
+                        // Cursor stores conversations as JSON blobs inside
+                        // SQLite rows; there is no source-file line for a
+                        // given turn.
+                        line_in_file: None,
                     },
                 };
                 *turn_index += 1;

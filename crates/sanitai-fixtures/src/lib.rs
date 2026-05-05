@@ -356,7 +356,7 @@ mod tests {
             };
             sum += v;
         }
-        sum % 10 == 0
+        sum.is_multiple_of(10)
     }
 
     fn b64url_decode_lossy(s: &str) -> String {

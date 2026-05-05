@@ -35,6 +35,11 @@ pub struct TurnMeta {
     /// Unix timestamp in seconds.
     pub timestamp: Option<i64>,
     pub model: Option<String>,
+    /// 1-based line number where this turn begins inside its source file,
+    /// when the parser can compute one. Line-oriented parsers (Claude JSONL,
+    /// Copilot logs) populate this; tree-structured parsers (ChatGPT export,
+    /// Cursor SQLite walks) leave it `None`.
+    pub line_in_file: Option<u32>,
 }
 
 /// A single message turn from a conversation, normalized across all LLM sources.

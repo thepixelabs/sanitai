@@ -153,6 +153,11 @@ struct ClaudeLineIter<'a> {
     byte_offset: u64,
     /// Running turn index within this file.
     turn_index: usize,
+    /// Running 1-based line counter into the original file. We tick this
+    /// once per `read_line` call (whether or not the line yields a turn)
+    /// so the value matches what an editor like VS Code or vim would jump
+    /// to with `:N`.
+    file_line: u32,
     buf: String,
     done: bool,
 }
@@ -164,6 +169,7 @@ impl<'a> ClaudeLineIter<'a> {
             path,
             byte_offset: 0,
             turn_index: 0,
+            file_line: 0,
             buf: String::new(),
             done: false,
         }
@@ -195,6 +201,11 @@ impl<'a> Iterator for ClaudeLineIter<'a> {
             let line_start = self.byte_offset;
             let line_end = line_start + read as u64;
             self.byte_offset = line_end;
+            // Increment line BEFORE deciding whether to emit so the count
+            // tracks file lines, not surviving turns. Empty lines and
+            // skipped record types still consume a line.
+            self.file_line = self.file_line.saturating_add(1);
+            let current_line = self.file_line;
 
             let trimmed = self.buf.trim_end_matches(['\r', '\n']);
             if trimmed.is_empty() {
@@ -202,9 +213,10 @@ impl<'a> Iterator for ClaudeLineIter<'a> {
             }
 
             match parse_line(trimmed) {
-                Ok(Some((role, content, meta))) => {
+                Ok(Some((role, content, mut meta))) => {
                     let id = (Arc::clone(&self.path), self.turn_index);
                     self.turn_index += 1;
+                    meta.line_in_file = Some(current_line);
                     return Some(Ok(Turn {
                         id,
                         role,
@@ -256,11 +268,15 @@ fn parse_line(line: &str) -> Result<Option<(Role, String, TurnMeta)>, LineError>
 
     let kind = raw.kind.as_deref().unwrap_or("");
 
-    // Pull optional metadata that applies to any record.
+    // Pull optional metadata that applies to any record. `line_in_file`
+    // is left at None here and stamped by the line iterator before the
+    // Turn is emitted — `parse_line` does not know what file line it sits
+    // on.
     let mut meta = TurnMeta {
         conversation_id: raw.session_id.clone(),
         timestamp: extract_timestamp(raw.timestamp.as_ref()),
         model: raw.model.clone(),
+        line_in_file: None,
     };
 
     match kind {
@@ -477,5 +493,25 @@ mod tests {
         let t1 = results[1].as_ref().expect("second");
         assert_eq!(t0.byte_range.start, 0);
         assert_eq!(t1.byte_range.start, t0.byte_range.end);
+    }
+
+    #[test]
+    fn line_in_file_is_one_based_and_skips_summaries() {
+        // A summary record on line 1, a user turn on line 2, a blank line on
+        // line 3, and another user turn on line 4. We expect the two emitted
+        // turns to report line_in_file == Some(2) and Some(4).
+        let input = r#"{"type":"summary","summary":"intro"}
+{"type":"user","message":{"role":"user","content":"first"}}
+
+{"type":"user","message":{"role":"user","content":"second"}}
+"#;
+        let results = parse_all(input);
+        assert_eq!(results.len(), 2);
+        let t0 = results[0].as_ref().expect("first");
+        let t1 = results[1].as_ref().expect("second");
+        assert_eq!(t0.content, "first");
+        assert_eq!(t0.meta.line_in_file, Some(2));
+        assert_eq!(t1.content, "second");
+        assert_eq!(t1.meta.line_in_file, Some(4));
     }
 }

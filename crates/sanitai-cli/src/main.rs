@@ -36,7 +36,7 @@ use sanitai_parsers::{
 };
 use sanitai_redactor::Redactor;
 use sanitai_sandbox::create_sandbox;
-use sanitai_store::{FindingRecord, ScanRecord, Store};
+use sanitai_store::{BeginScanRecord, FinalizeScanInput, FindingRecord, Store};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -179,13 +179,35 @@ enum RedactModeArg {
 #[derive(Serialize, Deserialize)]
 struct FindingJson {
     file: String,
+    /// 0-based message index within `file` — preserved for backwards
+    /// compatibility and for sources that don't carry a real source line
+    /// (ChatGPT JSON tree, Cursor SQLite).
     turn: usize,
+    /// 1-based source-file line for the originating turn, when the parser
+    /// can provide one. JSONL/log-line sources populate this; tree sources
+    /// leave it null.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
     detector: String,
+    /// Human-readable label for `detector`. Emitted as a convenience for
+    /// downstream consumers; the canonical id is still `detector`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    detector_display: String,
     confidence: String,
     byte_start: usize,
     byte_end: usize,
     transforms: Vec<String>,
     synthetic: bool,
+    /// Stable 8-char hex fingerprint. Recomputed by the `redact` path from the
+    /// matched byte range, so this field is informational on input and
+    /// authoritative on output.
+    #[serde(default)]
+    fingerprint: String,
+    /// Single-line redacted excerpt around the match. Never includes any
+    /// byte of the original secret. Display-only — programmatic consumers
+    /// can ignore it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    excerpt: String,
 }
 
 impl From<&Finding> for FindingJson {
@@ -193,7 +215,9 @@ impl From<&Finding> for FindingJson {
         Self {
             file: f.turn_id.0.to_string_lossy().into_owned(),
             turn: f.turn_id.1,
+            line: f.line_in_file,
             detector: f.detector_id.to_owned(),
+            detector_display: sanitai_detectors::display_name_for(f.detector_id).to_owned(),
             confidence: match f.confidence {
                 Confidence::High => "high",
                 Confidence::Medium => "medium",
@@ -218,6 +242,8 @@ impl From<&Finding> for FindingJson {
                 })
                 .collect(),
             synthetic: f.synthetic,
+            fingerprint: f.fingerprint_hex(),
+            excerpt: f.excerpt.clone(),
         }
     }
 }
@@ -378,6 +404,39 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
     let mut correlator =
         CrossTurnCorrelator::new(Arc::clone(&regex_arc), CrossTurnConfig::default());
 
+    // Open the history store eagerly so we can write the in-progress
+    // placeholder NOW (before any work). If the user kills the process
+    // mid-scan, the recovery sweep on the next launch will find this row
+    // and mark it cancelled. A failure to open is non-fatal — we just
+    // skip persistence.
+    let store = match Store::open() {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("history store open failed: {e}");
+            None
+        }
+    };
+    let project_name = infer_project_name(&file_paths);
+    let claude_account = infer_claude_account(&file_paths);
+    let format_label = match args.format {
+        OutputFormat::Human => "human",
+        OutputFormat::Json => "json",
+        OutputFormat::Sarif => "sarif",
+    };
+    if let Some(ref s) = store {
+        let plan_total_files = (file_paths.len() + stdin_paths.len()) as i64;
+        if let Err(e) = s.begin_scan(&BeginScanRecord {
+            scan_id: scan_id.clone(),
+            started_at_ns,
+            project_name: project_name.clone(),
+            claude_account: claude_account.clone(),
+            total_files: plan_total_files,
+            format: format_label.to_owned(),
+        }) {
+            tracing::warn!("history store begin_scan failed: {e}");
+        }
+    }
+
     // Read stdin BEFORE applying the strict sandbox. On Linux seccomp-bpf the
     // `read` syscall on fd 0 is on the allowlist, but reading stdin up front
     // keeps the behaviour identical across platforms and lets us treat the
@@ -398,34 +457,75 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         }
     }
 
+    // Filter stdin findings into the global bucket and commit them.
+    let mut filtered_stdin: Vec<Finding> = Vec::new();
     for f in stdin_findings {
         if f.is_synthetic() && !args.include_synthetic {
             continue;
         }
         if confidence_passes(&f.confidence, &confidence_filter) {
-            all_findings.push(f);
+            filtered_stdin.push(f);
         }
     }
+    if let Some(ref s) = store {
+        let stdin_records: Vec<FindingRecord> = filtered_stdin
+            .iter()
+            .map(|f| finding_to_record(f, &scan_id))
+            .collect();
+        if !stdin_paths.is_empty() {
+            if let Err(e) = s.commit_file(&scan_id, "<stdin>", &stdin_records) {
+                tracing::warn!("commit_file(<stdin>) failed: {e}");
+            }
+        }
+    }
+    all_findings.extend(filtered_stdin);
 
     for path in &file_paths {
-        scanned_file_paths.push(path.to_string_lossy().into_owned());
+        let path_str = path.to_string_lossy().into_owned();
+        scanned_file_paths.push(path_str.clone());
         match scan_path(path, &detectors, &chunker_cfg, Some(&mut correlator)) {
             Ok((findings, turns)) => {
                 total_turns += turns;
+                let mut file_findings: Vec<Finding> = Vec::new();
                 for f in findings {
                     if f.is_synthetic() && !args.include_synthetic {
                         continue;
                     }
                     if confidence_passes(&f.confidence, &confidence_filter) {
-                        all_findings.push(f);
+                        file_findings.push(f);
                     }
                 }
+                // Per-file commit — each call is its own transaction so a
+                // process kill mid-scan still leaves committed rows for
+                // every file processed before the kill.
+                if let Some(ref s) = store {
+                    let recs: Vec<FindingRecord> = file_findings
+                        .iter()
+                        .map(|f| finding_to_record(f, &scan_id))
+                        .collect();
+                    if let Err(e) = s.commit_file(&scan_id, &path_str, &recs) {
+                        tracing::warn!(path = %path.display(), "commit_file failed: {e}");
+                    }
+                }
+                all_findings.extend(file_findings);
             }
             Err(e) => {
                 tracing::warn!(path = %path.display(), "scan error: {e}");
+                // Still record the path so the row count in History is honest.
+                if let Some(ref s) = store {
+                    if let Err(e) = s.commit_file(&scan_id, &path_str, &[]) {
+                        tracing::warn!(path = %path.display(), "commit_file (skip) failed: {e}");
+                    }
+                }
             }
         }
     }
+
+    // Deduplicate findings by fingerprint before any output or persistence —
+    // the cross-turn correlator and the per-chunk regex pass can both report
+    // a secret that lies entirely within one turn. See `dedupe_by_fingerprint`
+    // for the full set of conditions under which collisions occur.
+    sanitai_core::finding::dedupe_by_fingerprint(&mut all_findings);
 
     // Build the human-view filter. Unless --show-all is set, hide findings
     // classified as Educational or DocumentationQuote. JSON/SARIF outputs
@@ -467,97 +567,86 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         }
     }
 
-    // ── history store write (non-fatal) ─────────────────────────────────────
+    // ── history store finalize (non-fatal) ──────────────────────────────────
+    // begin_scan + commit_file have already persisted the scan row, file
+    // paths, and findings. finalize_scan flips `complete` to 1, updates
+    // duration / exit_code / total_turns, and re-derives finding totals
+    // from the findings table.
     let elapsed_ms = scan_start.elapsed().as_millis() as i64;
-    let project_name = infer_project_name(&file_paths);
-    let claude_account = infer_claude_account(&file_paths);
-
-    let scan_record = ScanRecord {
-        scan_id: scan_id.clone(),
-        started_at_ns,
-        duration_ms: elapsed_ms,
-        project_name,
-        claude_account,
-        total_files: scanned_file_paths.len() as i64,
-        total_turns: total_turns as i64,
-        format: match args.format {
-            OutputFormat::Human => "human",
-            OutputFormat::Json => "json",
-            OutputFormat::Sarif => "sarif",
-        }
-        .to_owned(),
-        exit_code: if has_findings && !args.exit_zero {
-            1
-        } else {
-            0
-        },
-        findings_high: all_findings
-            .iter()
-            .filter(|f| matches!(f.confidence, Confidence::High))
-            .count() as i64,
-        findings_medium: all_findings
-            .iter()
-            .filter(|f| matches!(f.confidence, Confidence::Medium))
-            .count() as i64,
-        findings_low: all_findings
-            .iter()
-            .filter(|f| matches!(f.confidence, Confidence::Low))
-            .count() as i64,
+    let exit_code = if has_findings && !args.exit_zero {
+        1
+    } else {
+        0
     };
-
-    let finding_records: Vec<FindingRecord> = all_findings
-        .iter()
-        .map(|f| FindingRecord {
-            scan_id: scan_id.clone(),
-            detector_id: f.detector_id.to_owned(),
-            file_path: f.turn_id.0.to_string_lossy().into_owned(),
-            turn_idx: f.turn_id.1 as i64,
-            confidence: match f.confidence {
-                Confidence::High => "high",
-                Confidence::Medium => "medium",
-                Confidence::Low => "low",
-            }
-            .to_owned(),
-            transforms: {
-                let names: Vec<&str> = f
-                    .transform
-                    .0
-                    .iter()
-                    .map(|t| match t {
-                        Transform::Base64 => "base64",
-                        Transform::Hex => "hex",
-                        Transform::UrlEncoded => "url",
-                        Transform::Gzip => "gzip",
-                        Transform::HtmlEntity => "html",
-                    })
-                    .collect();
-                serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned())
+    if let Some(ref s) = store {
+        if let Err(e) = s.finalize_scan(
+            &scan_id,
+            &FinalizeScanInput {
+                duration_ms: elapsed_ms,
+                total_turns: total_turns as i64,
+                exit_code,
+                cancelled: false,
             },
-            synthetic: f.synthetic,
-            role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
-            category: Some(format!("{:?}", f.category).to_lowercase()),
-            entropy_score: Some(f.entropy_score),
-            context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
-            // secret_hash is computed by the store layer with the installation
-            // key in a later phase; None for now.
-            secret_hash: None,
-        })
-        .collect();
-
-    match Store::open() {
-        Ok(store) => {
-            if let Err(e) = store.record_scan(&scan_record, &scanned_file_paths, &finding_records) {
-                tracing::warn!("history store write failed: {e}");
-            }
+        ) {
+            tracing::warn!("history store finalize_scan failed: {e}");
         }
-        Err(e) => tracing::warn!("history store open failed: {e}"),
     }
+    // _scanned_file_paths is now informational only; the store learned each
+    // path via commit_file. We keep it built for future log/observability use.
+    let _ = (&scanned_file_paths, &project_name, &claude_account);
     // ────────────────────────────────────────────────────────────────────────
 
     if has_findings && !args.exit_zero {
         1
     } else {
         0
+    }
+}
+
+/// Build the per-finding store row from a live `Finding`. Used in the
+/// per-file commit_file calls during scan.
+fn finding_to_record(f: &Finding, scan_id: &str) -> FindingRecord {
+    FindingRecord {
+        scan_id: scan_id.to_owned(),
+        detector_id: f.detector_id.to_owned(),
+        file_path: f.turn_id.0.to_string_lossy().into_owned(),
+        turn_idx: f.turn_id.1 as i64,
+        confidence: match f.confidence {
+            Confidence::High => "high",
+            Confidence::Medium => "medium",
+            Confidence::Low => "low",
+        }
+        .to_owned(),
+        transforms: {
+            let names: Vec<&str> = f
+                .transform
+                .0
+                .iter()
+                .map(|t| match t {
+                    Transform::Base64 => "base64",
+                    Transform::Hex => "hex",
+                    Transform::UrlEncoded => "url",
+                    Transform::Gzip => "gzip",
+                    Transform::HtmlEntity => "html",
+                })
+                .collect();
+            serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned())
+        },
+        synthetic: f.synthetic,
+        role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
+        category: Some(format!("{:?}", f.category).to_lowercase()),
+        entropy_score: Some(f.entropy_score),
+        context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
+        // secret_hash is computed by the store layer with the installation
+        // key in a later phase; None for now.
+        secret_hash: None,
+        // v4 fields: enough metadata for a History → Results reload to
+        // reconstruct the row without ever persisting `matched_raw`.
+        line_in_file: f.line_in_file.map(|n| n as i64),
+        fingerprint: Some(f.fingerprint_hex()),
+        byte_start: Some(f.byte_range.start as i64),
+        byte_end: Some(f.byte_range.end as i64),
+        excerpt: Some(f.excerpt.clone()),
     }
 }
 
@@ -643,6 +732,8 @@ fn scan_path(
         // Backfill the turn role onto findings produced by this turn's chunks.
         // `Detector::scan` operates on a `Chunk` which does not carry role
         // metadata, so per-chunk findings come back with `role: None`.
+        // `line_in_file` is already stamped by the detector via the chunk's
+        // `line_in_file` field; we leave it alone here.
         for f in &mut findings[pre_turn_len..] {
             if f.role.is_none() {
                 f.role = Some(turn.role.clone());
@@ -785,12 +876,20 @@ fn print_human(findings: &[Finding]) {
             Confidence::Low => "LOW   ",
         };
         let file = f.turn_id.0.display();
-        let turn = f.turn_id.1;
-        let det = f.detector_id;
+        // Prefer the source line when the parser produced one; fall back to
+        // the message index. The fallback matches the in-TUI rule (see
+        // `results.rs::location_label`) so human and TUI rendering agree.
+        let location = match f.line_in_file {
+            Some(n) => format!("L{n}"),
+            None => format!("msg {}", f.turn_id.1),
+        };
+        let raw_id = f.detector_id;
+        let pretty = sanitai_detectors::display_name_for(raw_id);
+        let det = if pretty.is_empty() { raw_id } else { pretty };
         let bs = f.byte_range.start;
         let be = f.byte_range.end;
         if f.transform.is_empty() {
-            println!("[{conf}] {file}  turn={turn}  {det}  bytes={bs}..{be}");
+            println!("[{conf}] {file}  {location}  {det}  bytes={bs}..{be}");
         } else {
             let chain: Vec<&str> = f
                 .transform
@@ -805,7 +904,7 @@ fn print_human(findings: &[Finding]) {
                 })
                 .collect();
             println!(
-                "[{conf}] {file}  turn={turn}  {det}  bytes={bs}..{be}  via={}",
+                "[{conf}] {file}  {location}  {det}  bytes={bs}..{be}  via={}",
                 chain.join("+")
             );
         }
@@ -883,6 +982,16 @@ fn do_redact(args: RedactArgs) -> Result<()> {
             // Safe: range is validated above.
             let raw = content[start..end].to_owned();
             let id: &'static str = Box::leak(jf.detector.clone().into_boxed_str());
+            // Recompute the fingerprint from the reconstructed bytes so it
+            // matches what the original scan produced. The redact path round-
+            // trips findings through JSON, so we cannot trust an externally-
+            // supplied fingerprint here even if the JSON carried one.
+            let fingerprint = sanitai_core::finding::compute_fingerprint(
+                raw.as_bytes(),
+                id,
+                arc_path.as_ref(),
+                jf.turn,
+            );
             Some(Finding {
                 turn_id: (Arc::clone(&arc_path), jf.turn),
                 detector_id: id,
@@ -896,6 +1005,12 @@ fn do_redact(args: RedactArgs) -> Result<()> {
                 category: sanitai_core::Category::Secret,
                 entropy_score: 0.0,
                 context_class: sanitai_core::ContextClass::Unclassified,
+                fingerprint,
+                // Round-tripped findings drop the line/excerpt: those are
+                // display-only fields and the redact path doesn't render
+                // them.
+                line_in_file: jf.line,
+                excerpt: String::new(),
             })
         })
         .collect();

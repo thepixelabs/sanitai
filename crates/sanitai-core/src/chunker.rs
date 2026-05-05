@@ -70,6 +70,7 @@ impl<'a> Iterator for ChunkIter<'a> {
             offset_map: OffsetMap::new_linear(start as u64 + self.turn.byte_range.start),
             is_message_start: start == 0,
             turn_id: self.turn.id.clone(),
+            line_in_file: self.turn.meta.line_in_file,
         };
 
         // Advance.

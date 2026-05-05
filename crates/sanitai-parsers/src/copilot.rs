@@ -81,6 +81,10 @@ struct CopilotLineIter<'a> {
     path: Arc<PathBuf>,
     byte_offset: u64,
     turn_index: usize,
+    /// Running 1-based line counter into the original log file. Each call
+    /// to `read_line` advances this — empty lines, lines without JSON, and
+    /// recognised turns all count.
+    file_line: u32,
     buf: String,
     done: bool,
 }
@@ -92,6 +96,7 @@ impl<'a> CopilotLineIter<'a> {
             path,
             byte_offset: 0,
             turn_index: 0,
+            file_line: 0,
             buf: String::new(),
             done: false,
         }
@@ -122,6 +127,8 @@ impl<'a> Iterator for CopilotLineIter<'a> {
             let line_start = self.byte_offset;
             let line_end = line_start + read as u64;
             self.byte_offset = line_end;
+            self.file_line = self.file_line.saturating_add(1);
+            let current_line = self.file_line;
 
             let trimmed = self.buf.trim_end_matches(['\r', '\n']);
             if trimmed.is_empty() {
@@ -158,7 +165,10 @@ impl<'a> Iterator for CopilotLineIter<'a> {
                     end: line_end,
                 },
                 source: SourceKind::GitHubCopilot,
-                meta: TurnMeta::default(),
+                meta: TurnMeta {
+                    line_in_file: Some(current_line),
+                    ..TurnMeta::default()
+                },
             }));
         }
     }

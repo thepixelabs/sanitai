@@ -127,6 +127,7 @@ impl CrossTurnCorrelator {
                 Some(turn.role.clone()),
                 0,
                 &empty_chain,
+                turn.meta.line_in_file,
                 &mut scan_out,
             );
 
@@ -139,7 +140,8 @@ impl CrossTurnCorrelator {
                         contributing_turns: vec![prior.turn_index, turn.id.1],
                     };
                     // Cross-turn findings are attributed to the turn that
-                    // completed the secret, so its role applies.
+                    // completed the secret, so its role applies. The line
+                    // number was already stamped via `scan_str(..., line)`.
                     f.role = Some(turn.role.clone());
                     out.push(f);
                 }

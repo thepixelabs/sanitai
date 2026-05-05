@@ -76,3 +76,5 @@ cosign.key
 !docs/nix-cta.png
 !docs/nix-readme.png
 !docs/nix-float.svg
+# Internal planning documents — keep out of public history
+docs/planning/

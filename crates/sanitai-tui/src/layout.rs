@@ -1,24 +1,33 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
+use crate::banner::BANNER_HEIGHT;
+
 /// Split the terminal into three vertical zones:
-/// [menu area | nix area] stacked, with footer at the bottom.
+///
+/// ```text
+/// ┌──────────────────────────┐
+/// │   SanitAI wordmark       │  banner_area  (BANNER_HEIGHT rows)
+/// │   tagline                │
+/// ├──────────────────────────┤
+/// │                          │
+/// │   screen body            │  body_area    (full remaining width)
+/// │                          │
+/// ├──────────────────────────┤
+/// │ keys │ last-scan         │  footer_area  (1 row)
+/// └──────────────────────────┘
+/// ```
+///
+/// On terminals shorter than `BANNER_HEIGHT + 2` rows the banner zone is
+/// clipped by ratatui's layout solver — the body still gets at least 1 row.
 pub fn main_layout(area: Rect) -> (Rect, Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),   // main body
-            Constraint::Length(1), // footer
+            Constraint::Length(BANNER_HEIGHT), // banner + tagline
+            Constraint::Min(1),                // body
+            Constraint::Length(1),             // footer
         ])
         .split(area);
 
-    let body = chunks[0];
-    let footer = chunks[1];
-
-    // Split body: menu on left, Nix on right (fixed 22 cols)
-    let body_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(30), Constraint::Length(22)])
-        .split(body);
-
-    (body_chunks[0], body_chunks[1], footer)
+    (chunks[0], chunks[1], chunks[2])
 }

@@ -11,4 +11,4 @@ pub mod store;
 
 pub use error::StoreError;
 pub use models::{FindingRecord, ScanRecord};
-pub use store::{Store, StoreTotals};
+pub use store::{BeginScanRecord, FinalizeScanInput, Store, StoreTotals};

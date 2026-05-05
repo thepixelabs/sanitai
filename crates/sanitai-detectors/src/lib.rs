@@ -16,5 +16,7 @@ pub mod transform;
 pub use context_classifier::{ContextClassifier, ContextClassifierConfig};
 pub use cross_turn::{CrossTurnCandidate, CrossTurnConfig, CrossTurnCorrelator};
 pub use keyword_filter::KeywordFilter;
-pub use regex_detector::{iban_valid, luhn_valid, shannon_entropy, RegexDetector};
+pub use regex_detector::{
+    display_name_for, iban_valid, luhn_valid, shannon_entropy, RegexDetector,
+};
 pub use transform::{TransformConfig, TransformDetector};

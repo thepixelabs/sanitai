@@ -156,7 +156,7 @@ fn try_decode_base64(tok: &str) -> Option<Vec<u8>> {
 }
 
 fn try_decode_hex(tok: &str) -> Option<Vec<u8>> {
-    if tok.len() % 2 != 0 {
+    if !tok.len().is_multiple_of(2) {
         return None;
     }
     hex::decode(tok).ok()
@@ -198,6 +198,10 @@ struct CascadeCtx<'a> {
     /// Role is unknown inside the transform cascade (we operate on decoded
     /// payloads, not original turns) — always `None`.
     role: Option<sanitai_core::turn::Role>,
+    /// Source-file line of the originating chunk's turn, propagated so
+    /// findings extracted from a decoded blob still point at the line a
+    /// human can navigate to.
+    line_in_file: Option<u32>,
     out: &'a mut Vec<Finding>,
     scratch: &'a mut DetectorScratch,
 }
@@ -222,8 +226,15 @@ impl<'a> CascadeCtx<'a> {
 
     fn rescan(&mut self, decoded: &[u8], chain: &TransformChain, depth: u8) {
         if let Ok(s) = std::str::from_utf8(decoded) {
-            self.inner
-                .scan_str(s, self.turn_id, self.role.clone(), 0, chain, self.out);
+            self.inner.scan_str(
+                s,
+                self.turn_id,
+                self.role.clone(),
+                0,
+                chain,
+                self.line_in_file,
+                self.out,
+            );
             if depth < self.config.max_depth {
                 self.cascade(s, chain, depth + 1);
             }
@@ -325,6 +336,7 @@ impl Detector for TransformDetector {
             config: &self.config,
             turn_id: &chunk.turn_id,
             role: None,
+            line_in_file: chunk.line_in_file,
             out,
             scratch,
         };
@@ -358,6 +370,7 @@ mod tests {
             offset_map: OffsetMap::new_linear(0),
             is_message_start: true,
             turn_id: tid(),
+            line_in_file: None,
         };
         let mut scratch = DetectorScratch::default();
         let mut out = Vec::new();
@@ -384,6 +397,7 @@ mod tests {
             offset_map: OffsetMap::new_linear(0),
             is_message_start: true,
             turn_id: tid(),
+            line_in_file: None,
         };
         let mut scratch = DetectorScratch::default();
         let mut out = Vec::new();
@@ -409,6 +423,7 @@ mod tests {
             offset_map: OffsetMap::new_linear(0),
             is_message_start: true,
             turn_id: tid(),
+            line_in_file: None,
         };
         let mut scratch = DetectorScratch::default();
         let mut out = Vec::new();

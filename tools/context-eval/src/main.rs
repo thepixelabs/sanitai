@@ -121,6 +121,12 @@ fn main() -> Result<()> {
             },
             _ => SpanKind::Single,
         };
+        let fingerprint = sanitai_core::finding::compute_fingerprint(
+            matched.as_bytes(),
+            "corpus_eval",
+            file_path.as_ref(),
+            entry.finding_turn_idx,
+        );
         let finding = Finding {
             turn_id: (file_path, entry.finding_turn_idx),
             detector_id: "corpus_eval",
@@ -134,6 +140,12 @@ fn main() -> Result<()> {
             category: Category::Credential,
             entropy_score: entry.entropy_score.unwrap_or(4.0),
             context_class: ContextClass::Unclassified,
+            fingerprint,
+            // Corpus-eval drives the classifier directly off synthetic
+            // turns, so source-line attribution and excerpt rendering are
+            // not meaningful here.
+            line_in_file: None,
+            excerpt: String::new(),
         };
 
         let predicted = classifier.classify(&finding, &turns);

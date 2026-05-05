@@ -1,0 +1,14 @@
+SanitAI
+Copyright (c) 2026 SanitAI Contributors
+
+---
+
+This software's detection ruleset was developed independently. Several rules
+were informed by the open-source gitleaks project
+(https://github.com/gitleaks/gitleaks), MIT-licensed, copyright gitleaks
+contributors. Patterns that match vendor-defined token formats are
+functionally dictated by those formats and are not creative works; nonetheless
+we acknowledge gitleaks as a reference and prior art in this space.
+
+gitleaks MIT License:
+  https://github.com/gitleaks/gitleaks/blob/master/LICENSE

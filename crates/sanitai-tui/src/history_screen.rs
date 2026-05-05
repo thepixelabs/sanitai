@@ -333,6 +333,16 @@ fn render_row(area: Rect, buf: &mut Buffer, rec: &ScanRecord, y: u16, selected: 
     buf.set_string(x, y, &dur_str, Style::default().fg(COLOR_MUTED));
     x += dur_str.len() as u16 + 2;
 
+    // Incomplete/cancelled marker — surfaces force-killed and explicitly
+    // cancelled scans so the user knows the row's totals are partial.
+    // Rendered before the project name so the visual cue is adjacent to
+    // the place where the project would otherwise sit.
+    if !rec.complete || rec.cancelled {
+        let tag = "[!] ";
+        buf.set_string(x, y, tag, Style::default().fg(COLOR_WARN));
+        x += tag.len() as u16;
+    }
+
     // Project name (or em-dash placeholder)
     let project = rec.project_name.as_deref().unwrap_or("\u{2014}");
     if x < area.right() {
@@ -481,6 +491,8 @@ mod tests {
             findings_high: h,
             findings_medium: m,
             findings_low: l,
+            complete: true,
+            cancelled: false,
         }
     }
 

@@ -156,6 +156,9 @@ impl ConversationParser for GeminiParser {
                         conversation_id: title.clone(),
                         timestamp: msg.timestamp.as_ref().and_then(|v| v.as_i64()),
                         model: None,
+                        // Gemini exports are JSON trees; no per-turn file
+                        // line is meaningful.
+                        line_in_file: None,
                     },
                 }));
                 turn_index += 1;

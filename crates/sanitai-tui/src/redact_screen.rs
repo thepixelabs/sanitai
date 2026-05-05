@@ -74,9 +74,12 @@ impl RedactScreen {
         self.phase = RedactPhase::List;
     }
 
-    /// Execute the redaction: read the file, apply Redactor::Mask to all
-    /// findings from that file, write output to "<original_path>.sanitized".
-    pub fn execute_redact(&mut self) {
+    /// Execute the redaction: read the file, apply the configured `mode` to
+    /// all findings from that file, write output to "<original_path>.sanitized".
+    /// `mode` is plumbed in from `App::app_settings.redact_mode` so the user's
+    /// Settings choice is honoured by both this screen and the R-from-Results
+    /// shortcut.
+    pub fn execute_redact(&mut self, mode: RedactMode) {
         if self.findings.is_empty() {
             self.last_result = Some(RedactResult {
                 output_path: PathBuf::new(),
@@ -117,8 +120,8 @@ impl RedactScreen {
             }
         };
 
-        // Apply Mask redaction.
-        let mut redactor = Redactor::new(RedactMode::Mask);
+        // Apply the selected redaction mode.
+        let mut redactor = Redactor::new(mode);
         let redacted = redactor.redact(&content, &file_findings);
 
         // Write to <original_path>.sanitized.

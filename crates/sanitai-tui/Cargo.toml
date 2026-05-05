@@ -16,6 +16,7 @@ sanitai-detectors = { path = "../sanitai-detectors" }
 sanitai-parsers   = { path = "../sanitai-parsers" }
 sanitai-sandbox   = { path = "../sanitai-sandbox" }
 anyhow            = { workspace = true }
+serde             = { workspace = true }
 serde_json        = { workspace = true }
 tracing           = { workspace = true }
 crossbeam-channel = { workspace = true }
@@ -23,3 +24,11 @@ dirs-next         = { workspace = true }
 walkdir           = { workspace = true }
 futures           = { workspace = true }
 ulid              = { workspace = true }
+figlet-rs         = "0.2"
+# Text-only clipboard. The default `image-data` feature drags in the
+# `image` crate, which currently requires rustc 1.88+ — pinned out so the
+# workspace MSRV (1.87) and CI runner stay green.
+arboard           = { version = "3", default-features = false }
+
+[dev-dependencies]
+tempfile = { workspace = true }

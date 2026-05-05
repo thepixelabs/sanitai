@@ -27,6 +27,21 @@ pub struct ScanRecord {
     pub findings_medium: i64,
     /// Count of low-confidence findings.
     pub findings_low: i64,
+    /// True if the scan reached `finalize_scan`. False means the scan was
+    /// in-progress at the time the row was first inserted; the recovery
+    /// sweep on the next `Store::open` flips this to true. (Schema v3.)
+    #[serde(default = "default_complete")]
+    pub complete: bool,
+    /// True if the user explicitly cancelled the scan, OR if the recovery
+    /// sweep promoted an `complete=0` row (i.e. the host process was
+    /// killed mid-scan). (Schema v3.)
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+/// Pre-v3 records didn't carry `complete`; assume true for backward compat.
+fn default_complete() -> bool {
+    true
 }
 
 /// A single finding captured during a scan.
@@ -57,4 +72,22 @@ pub struct FindingRecord {
     /// HMAC-SHA256 of the secret value, keyed with the per-install key.
     /// Allows deduplication across scans without storing the raw secret.
     pub secret_hash: Option<String>,
+    /// 1-based source line number, when the parser supplied one. (Schema v4.)
+    /// Tree-structured exports (ChatGPT JSON, Cursor SQLite blob walks) leave
+    /// this `None`; JSONL parsers populate it.
+    pub line_in_file: Option<i64>,
+    /// Stable 8-char hex fingerprint of the finding (the form returned by
+    /// `Finding::fingerprint_hex`). (Schema v4.) Old v3 rows have `None`.
+    pub fingerprint: Option<String>,
+    /// Byte offset of the match start within the file's turn content.
+    /// (Schema v4.) Reconstructed into a `Range<usize>` on reload.
+    pub byte_start: Option<i64>,
+    /// Byte offset of the match end within the file's turn content.
+    /// (Schema v4.)
+    pub byte_end: Option<i64>,
+    /// Single-line redacted excerpt around the match — the same string the
+    /// scanner showed in the live Results detail pane. Contains the
+    /// `[FP:xxxxxxxx]` placeholder rather than any byte of the secret.
+    /// (Schema v4.)
+    pub excerpt: Option<String>,
 }

@@ -10,7 +10,7 @@ pub struct HelpOverlay;
 
 impl Widget for &HelpOverlay {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let popup = centered_rect(60, 24, area);
+        let popup = centered_rect(60, 32, area);
 
         if popup.width < 4 || popup.height < 4 {
             return;
@@ -132,12 +132,57 @@ fn content_rows() -> Vec<Row> {
         }, // blank spacer
         Row {
             key: None,
+            desc: "Results",
+        },
+        Row {
+            key: None,
+            desc:
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("Enter"),
+            desc: "Toggle finding detail pane",
+        },
+        Row {
+            key: Some("f"),
+            desc: "Suppress / un-suppress finding",
+        },
+        Row {
+            key: Some("o"),
+            desc: "Open file at line in $VISUAL/$EDITOR (or default app)",
+        },
+        Row {
+            key: Some("c"),
+            desc: "Copy fingerprint to clipboard",
+        },
+        Row {
+            key: Some("R"),
+            desc: "Redact selected file (inline y/n prompt)",
+        },
+        Row {
+            key: Some("Tab"),
+            desc: "Toggle Educational/DocQuote",
+        },
+        Row {
+            key: Some("0/1/2/3"),
+            desc: "Min confidence (any/H/M/L)",
+        },
+        Row {
+            key: None,
+            desc: "",
+        }, // blank spacer
+        Row {
+            key: None,
             desc: "History",
         },
         Row {
             key: None,
             desc:
                 "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        },
+        Row {
+            key: Some("Enter"),
+            desc: "Load scan into Results",
         },
         Row {
             key: Some("/"),
@@ -182,6 +227,11 @@ fn render_content(area: Rect, buf: &mut Buffer) {
     let rows = content_rows();
     let mut y = y_start;
 
+    // The straightforward `for row in &rows { y += 1 }` reads better than a
+    // (y_start..).zip(rows) form because we early-break when we run out of
+    // vertical space. The clippy::explicit_counter_loop suggestion would
+    // hurt readability here.
+    #[allow(clippy::explicit_counter_loop)]
     for row in &rows {
         if y >= footer_row {
             break;

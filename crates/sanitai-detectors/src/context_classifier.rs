@@ -318,8 +318,15 @@ mod tests {
     }
 
     fn mk_finding(turn_idx: usize, matched: &str) -> Finding {
+        let path = PathBuf::from("/tmp/t");
+        let fingerprint = sanitai_core::finding::compute_fingerprint(
+            matched.as_bytes(),
+            "test_rule",
+            &path,
+            turn_idx,
+        );
         Finding {
-            turn_id: (Arc::new(PathBuf::from("/tmp/t")), turn_idx),
+            turn_id: (Arc::new(path), turn_idx),
             detector_id: "test_rule",
             byte_range: 0..matched.len(),
             matched_raw: matched.to_owned(),
@@ -331,6 +338,9 @@ mod tests {
             category: sanitai_core::traits::Category::Credential,
             entropy_score: 4.5,
             context_class: ContextClass::Unclassified,
+            fingerprint,
+            line_in_file: None,
+            excerpt: String::new(),
         }
     }
 

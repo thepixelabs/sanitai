@@ -1,10 +1,12 @@
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use crossbeam_channel::Sender;
 use sanitai_core::{
     chunk::{ChunkerConfig, DetectorScratch},
     chunker::chunk_turn,
@@ -31,10 +33,50 @@ pub struct ScanSummary {
     pub paths: Vec<PathBuf>,
     /// All findings retained so the caller can write them to the store.
     pub findings: Vec<Finding>,
+    /// True if the user cancelled the scan before it completed.
+    pub cancelled: bool,
 }
 
-pub fn run_auto_scan() -> Result<ScanSummary> {
-    let start = std::time::Instant::now();
+/// Events sent from the worker thread back to the UI thread during a scan.
+///
+/// `Plan` arrives first and tells the UI the size of the work. `FileStart` /
+/// `FileDone` bracket each file so the UI can show a scrolling tail and
+/// recompute throughput. `Done` carries the full `ScanSummary` for the
+/// Results screen.
+#[allow(dead_code)] // some fields are wire-only; the UI is free to ignore them
+pub enum ScanProgressEvent {
+    Plan {
+        total_files: usize,
+        total_bytes: u64,
+    },
+    FileStart {
+        path: PathBuf,
+        size: u64,
+    },
+    FileDone {
+        path: PathBuf,
+        size: u64,
+        findings: usize,
+        ms: u64,
+    },
+    /// File was discovered but had no recognised parser. Bytes still count
+    /// toward processed_bytes so the gauge advances honestly.
+    FileSkipped {
+        path: PathBuf,
+        size: u64,
+    },
+    Done(Box<ScanSummary>),
+    Error(String),
+}
+
+/// Run the auto-discovery scan, emitting progress events to `tx`. Checks
+/// `cancel` between files; on cancel, sends a final `Done` with whatever was
+/// scanned and `cancelled: true`.
+///
+/// Designed to be called from a worker thread spawned by the TUI. The caller
+/// owns the receiver and drains it on each render tick.
+pub fn run_auto_scan_progress(tx: Sender<ScanProgressEvent>, cancel: Arc<AtomicBool>) {
+    let start = Instant::now();
     let scan_id = ulid::Ulid::new().to_string();
     let started_at_ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -42,8 +84,6 @@ pub fn run_auto_scan() -> Result<ScanSummary> {
         .as_nanos() as i64;
 
     // Apply OS-level sandbox before touching untrusted files.
-    // This mirrors the strict phase in sanitai-cli. Failure is non-fatal —
-    // the tool logs a warning and continues without isolation.
     let sandbox = create_sandbox();
     if let Err(e) = sandbox.apply_strict() {
         tracing::warn!("TUI sandbox apply_strict failed (non-fatal): {e}");
@@ -52,6 +92,20 @@ pub fn run_auto_scan() -> Result<ScanSummary> {
     let home = dirs_next::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let discovered = discover_all(&home);
     let paths: Vec<PathBuf> = discovered.into_iter().map(|d| d.path).collect();
+
+    // Compute total bytes upfront so the gauge has an honest denominator.
+    // Files whose metadata fails get size 0 and won't break the total — they
+    // just contribute 0 to the gauge advance.
+    let sizes: Vec<u64> = paths
+        .iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .collect();
+    let total_bytes: u64 = sizes.iter().sum();
+
+    let _ = tx.send(ScanProgressEvent::Plan {
+        total_files: paths.len(),
+        total_bytes,
+    });
 
     let regex_arc = Arc::new(RegexDetector::new());
     let detectors: Vec<Box<dyn Detector>> = vec![
@@ -67,15 +121,47 @@ pub fn run_auto_scan() -> Result<ScanSummary> {
         CrossTurnCorrelator::new(Arc::clone(&regex_arc), CrossTurnConfig::default());
     let mut all_findings: Vec<Finding> = Vec::new();
     let mut total_turns = 0usize;
+    let mut cancelled = false;
 
-    for path in &paths {
+    for (path, size) in paths.iter().zip(sizes.iter()) {
+        if cancel.load(Ordering::Relaxed) {
+            cancelled = true;
+            break;
+        }
+
+        let _ = tx.send(ScanProgressEvent::FileStart {
+            path: path.clone(),
+            size: *size,
+        });
+
+        let file_start = Instant::now();
         match scan_one(path, &detectors, &chunker_cfg, &mut correlator) {
             Ok((findings, turns)) => {
+                let count = findings.len();
+                if count == 0 && turns == 0 {
+                    // Parser didn't recognise the file — count as skipped so
+                    // the UI can show that visually rather than as "0 findings".
+                    let _ = tx.send(ScanProgressEvent::FileSkipped {
+                        path: path.clone(),
+                        size: *size,
+                    });
+                    continue;
+                }
                 total_turns += turns;
                 all_findings.extend(findings);
+                let _ = tx.send(ScanProgressEvent::FileDone {
+                    path: path.clone(),
+                    size: *size,
+                    findings: count,
+                    ms: file_start.elapsed().as_millis() as u64,
+                });
             }
             Err(e) => {
                 tracing::debug!(path = %path.display(), error = %e, "skipping file");
+                let _ = tx.send(ScanProgressEvent::FileSkipped {
+                    path: path.clone(),
+                    size: *size,
+                });
             }
         }
     }
@@ -95,7 +181,7 @@ pub fn run_auto_scan() -> Result<ScanSummary> {
         .filter(|f| matches!(f.confidence, Confidence::Low))
         .count();
 
-    Ok(ScanSummary {
+    let summary = ScanSummary {
         scan_id,
         started_at_ns,
         total_files: paths.len(),
@@ -106,7 +192,10 @@ pub fn run_auto_scan() -> Result<ScanSummary> {
         duration_ms,
         paths,
         findings: all_findings,
-    })
+        cancelled,
+    };
+
+    let _ = tx.send(ScanProgressEvent::Done(Box::new(summary)));
 }
 
 fn scan_one(
@@ -168,6 +257,12 @@ fn scan_one(
         }
         findings.extend(correlator.push_turn(&turn));
     }
+
+    // Deduplicate within the file. The cross-turn correlator's sliding-window
+    // pass and the per-chunk regex pass can both report a secret that lies
+    // entirely within one turn — same matched_raw, same detector_id, same
+    // turn_idx → same fingerprint. Drop the second occurrence.
+    sanitai_core::finding::dedupe_by_fingerprint(&mut findings);
 
     Ok((findings, turn_count))
 }

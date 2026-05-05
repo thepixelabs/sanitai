@@ -277,6 +277,10 @@ fn parse_document(buf: &[u8], path: Arc<PathBuf>) -> Vec<Result<Turn, CoreError>
                 conversation_id: conv_id.clone(),
                 timestamp: message.create_time.map(|t| t as i64),
                 model: message.metadata.as_ref().and_then(|m| m.model_slug.clone()),
+                // ChatGPT exports are a single JSON tree — there is no
+                // meaningful per-turn line in the file. Leave None so the
+                // Results widget falls back to the message index.
+                line_in_file: None,
             };
 
             let turn = Turn {

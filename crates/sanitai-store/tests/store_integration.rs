@@ -11,6 +11,11 @@
 //! the public methods `record_scan`, `recent_scans`, `totals`, and `clear_all`,
 //! which is the correct level of abstraction for an external caller.
 
+// The integration tests deliberately exercise the back-compat `record_scan`
+// wrapper. New code paths use `begin_scan` + `commit_file` + `finalize_scan`;
+// see the unit tests in `store.rs` for those.
+#![allow(deprecated)]
+
 use sanitai_store::{FindingRecord, ScanRecord, Store};
 use tempfile::NamedTempFile;
 
@@ -42,6 +47,8 @@ fn make_scan(id: &str, started_at_ns: i64) -> ScanRecord {
         findings_high: 0,
         findings_medium: 0,
         findings_low: 0,
+        complete: true,
+        cancelled: false,
     }
 }
 
@@ -59,6 +66,11 @@ fn make_finding(scan_id: &str, confidence: &str) -> FindingRecord {
         entropy_score: None,
         context_class: None,
         secret_hash: None,
+        line_in_file: None,
+        fingerprint: None,
+        byte_start: None,
+        byte_end: None,
+        excerpt: None,
     }
 }
 
@@ -262,8 +274,16 @@ fn totals_returns_correct_aggregate_across_two_scans() {
         ..make_scan("IT-SCAN-021", 200_000)
     };
 
+    // finalize_scan re-derives finding totals from the actual rows in the
+    // findings table, so we must commit matching FindingRecords for the
+    // counts on the ScanRecord to be observable through `totals()`.
+    let dirty_findings = vec![
+        make_finding("IT-SCAN-020", "high"),
+        make_finding("IT-SCAN-020", "high"),
+        make_finding("IT-SCAN-020", "high"),
+    ];
     store
-        .record_scan(&dirty, &[], &[])
+        .record_scan(&dirty, &["chat.jsonl".to_string()], &dirty_findings)
         .expect("record dirty scan");
     store
         .record_scan(&clean, &[], &[])
@@ -303,7 +323,28 @@ fn totals_sums_correctly_across_three_dirty_scans() {
             exit_code: 1,
             ..make_scan(id, ts)
         };
-        store.record_scan(&scan, &[], &[]).expect("record scan");
+
+        // Build matching findings so finalize_scan recomputes the same
+        // h/m/l totals on the persisted row.
+        let mut findings = Vec::new();
+        for _ in 0..h {
+            findings.push(make_finding(id, "high"));
+        }
+        for _ in 0..m {
+            findings.push(make_finding(id, "medium"));
+        }
+        for _ in 0..l {
+            findings.push(make_finding(id, "low"));
+        }
+
+        let files = if findings.is_empty() {
+            vec![]
+        } else {
+            vec!["chat.jsonl".to_string()]
+        };
+        store
+            .record_scan(&scan, &files, &findings)
+            .expect("record scan");
     }
 
     let t = store.totals().expect("totals");

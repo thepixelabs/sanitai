@@ -73,7 +73,20 @@ pub struct SarifResult {
     level: &'static str,
     message: SarifMessage,
     locations: Vec<SarifLocation>,
+    /// SARIF 2.1.0 `partialFingerprints` — opaque per-result identifiers that
+    /// downstream tools (GitHub Code Scanning, Azure DevOps) use to
+    /// dedupe / suppress findings across re-runs. We populate
+    /// `primaryLocationLineHash` with our 8-char fingerprint per spec
+    /// convention.
+    #[serde(rename = "partialFingerprints")]
+    partial_fingerprints: SarifPartialFingerprints,
     properties: SarifProperties,
+}
+
+#[derive(Serialize)]
+pub struct SarifPartialFingerprints {
+    #[serde(rename = "primaryLocationLineHash")]
+    primary_location_line_hash: String,
 }
 
 #[derive(Serialize)]
@@ -100,6 +113,12 @@ pub struct SarifRegion {
     byte_offset: usize,
     #[serde(rename = "byteLength")]
     byte_length: usize,
+    /// 1-based source line (`physicalLocation.region.startLine`). Populated
+    /// when the parser produced a line attribution for the finding's turn;
+    /// otherwise the field is omitted so consumers can distinguish "no line
+    /// information" from "line 0".
+    #[serde(rename = "startLine", skip_serializing_if = "Option::is_none")]
+    start_line: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -163,34 +182,53 @@ pub fn findings_to_sarif(findings: &[Finding], tool_version: &str) -> SarifLog {
 
     let results: Vec<SarifResult> = findings
         .iter()
-        .map(|f| SarifResult {
-            rule_id: f.detector_id.to_string(),
-            level: confidence_level(&f.confidence),
-            message: SarifMessage {
-                text: format!(
-                    "{} detected at bytes {}..{}",
-                    f.detector_id, f.byte_range.start, f.byte_range.end
-                ),
-            },
-            locations: vec![SarifLocation {
-                physical_location: SarifPhysicalLocation {
-                    artifact_location: SarifArtifactLocation {
-                        uri: f.turn_id.0.to_string_lossy().into_owned(),
+        .map(|f| {
+            // Build a message that includes the human-friendly detector
+            // label and (when present) the redacted excerpt — both useful
+            // when a SARIF viewer renders the result row without the
+            // properties block.
+            let pretty = sanitai_detectors::display_name_for(f.detector_id);
+            let label = if pretty.is_empty() {
+                f.detector_id.to_owned()
+            } else {
+                pretty.to_owned()
+            };
+            let mut text = format!(
+                "{} detected at bytes {}..{}",
+                label, f.byte_range.start, f.byte_range.end
+            );
+            if !f.excerpt.is_empty() {
+                text.push_str("  excerpt: ");
+                text.push_str(&f.excerpt);
+            }
+            SarifResult {
+                rule_id: f.detector_id.to_string(),
+                level: confidence_level(&f.confidence),
+                message: SarifMessage { text },
+                locations: vec![SarifLocation {
+                    physical_location: SarifPhysicalLocation {
+                        artifact_location: SarifArtifactLocation {
+                            uri: f.turn_id.0.to_string_lossy().into_owned(),
+                        },
+                        region: SarifRegion {
+                            byte_offset: f.byte_range.start,
+                            byte_length: f.byte_range.end.saturating_sub(f.byte_range.start),
+                            start_line: f.line_in_file,
+                        },
                     },
-                    region: SarifRegion {
-                        byte_offset: f.byte_range.start,
-                        byte_length: f.byte_range.end.saturating_sub(f.byte_range.start),
-                    },
+                }],
+                partial_fingerprints: SarifPartialFingerprints {
+                    primary_location_line_hash: f.fingerprint_hex(),
                 },
-            }],
-            properties: SarifProperties {
-                turn: f.turn_id.1,
-                confidence: confidence_str(&f.confidence),
-                transforms: f.transform.0.iter().map(transform_str).collect(),
-                synthetic: f.synthetic,
-                context_class: "unclassified",
-                category: "credential",
-            },
+                properties: SarifProperties {
+                    turn: f.turn_id.1,
+                    confidence: confidence_str(&f.confidence),
+                    transforms: f.transform.0.iter().map(transform_str).collect(),
+                    synthetic: f.synthetic,
+                    context_class: "unclassified",
+                    category: "credential",
+                },
+            }
         })
         .collect();
 
@@ -220,8 +258,11 @@ mod tests {
     use std::sync::Arc;
 
     fn mk_finding(detector: &'static str, confidence: Confidence) -> Finding {
+        let path = PathBuf::from("/tmp/test.jsonl");
+        let fingerprint =
+            sanitai_core::finding::compute_fingerprint(b"REDACTED", detector, &path, 7);
         Finding {
-            turn_id: (Arc::new(PathBuf::from("/tmp/test.jsonl")), 7),
+            turn_id: (Arc::new(path), 7),
             detector_id: detector,
             byte_range: 10..25,
             matched_raw: "REDACTED".to_string(),
@@ -233,6 +274,9 @@ mod tests {
             category: sanitai_core::Category::Secret,
             entropy_score: 0.0,
             context_class: sanitai_core::ContextClass::Unclassified,
+            fingerprint,
+            line_in_file: Some(8),
+            excerpt: "before the value [FP:00000000] after the value".to_owned(),
         }
     }
 
@@ -291,5 +335,39 @@ mod tests {
         let log = findings_to_sarif(&[f], "0.1.2");
         let json = serde_json::to_string(&log).expect("ser");
         assert!(!json.contains("AKIATOPSECRETVALUE12"));
+    }
+
+    #[test]
+    fn sarif_emits_start_line_when_present() {
+        // mk_finding stamps line_in_file = Some(8); the SARIF region must
+        // surface that as `startLine: 8`.
+        let f = mk_finding("aws_access_key_id", Confidence::High);
+        let log = findings_to_sarif(&[f], "0.1.2");
+        let json = serde_json::to_value(&log).expect("ser");
+        let region = &json["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 8);
+    }
+
+    #[test]
+    fn sarif_omits_start_line_when_unknown() {
+        // ChatGPT-tree style finding: no line attribution.
+        let mut f = mk_finding("aws_access_key_id", Confidence::High);
+        f.line_in_file = None;
+        let log = findings_to_sarif(&[f], "0.1.2");
+        let json = serde_json::to_value(&log).expect("ser");
+        let region = &json["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"];
+        assert!(region.get("startLine").is_none());
+    }
+
+    #[test]
+    fn sarif_message_includes_pretty_label_and_excerpt() {
+        let f = mk_finding("aws_access_key_id", Confidence::High);
+        let log = findings_to_sarif(&[f], "0.1.2");
+        let json = serde_json::to_value(&log).expect("ser");
+        let msg = json["runs"][0]["results"][0]["message"]["text"]
+            .as_str()
+            .expect("message text");
+        assert!(msg.contains("AWS Access Key"), "got: {msg}");
+        assert!(msg.contains("[FP:00000000]"));
     }
 }
