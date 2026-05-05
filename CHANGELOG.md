@@ -39,8 +39,6 @@ Drops the `atty` dependency in favour of the stdlib `IsTerminal` trait (stable s
   mk_finding - sanitai-detectors/regex_detector.rs: fix huggingface_token test — token was 39 chars
   but pattern requires exactly 37
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
 - **ci**: Fix sandbox clippy errors (Linux-only dead code + private interface) and auto-commit
   Cargo.lock on release
   ([`420dc45`](https://github.com/thepixelabs/sanitai/commit/420dc453a0fab978a0cdd4e0fc566a780b49accf))
@@ -258,8 +256,6 @@ Feature work recovered and rebased cleanly onto main. `docs/planning/` has been 
 - **phase-0**: Enrich Finding data model, schema v2 migration, vault_legacy_token entropy gate
   ([`d4ba83f`](https://github.com/thepixelabs/sanitai/commit/d4ba83f371c17db9729f1cc94c374996e7824edb))
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
 - **phase-1b+4b**: Context-gated detector rules, TUI ResultsFilter, --show-all flag
   ([`91554b9`](https://github.com/thepixelabs/sanitai/commit/91554b9c158ac52347578a3685fbd14a4a23e49a))
 
@@ -269,12 +265,8 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
   screens - Add --show-all CLI flag: suppresses Educational/DocumentationQuote by default - Add
   pipe_mode and tui_smoke integration tests with fixtures
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
 - **phase-2+1a**: Aho-corasick keyword pre-filter, stopwords, 25 new detector rules
   ([`f4c1eee`](https://github.com/thepixelabs/sanitai/commit/f4c1eee9e6a491ef19feff81cd5d63d95bbc35fc))
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 - **phase-3+4a**: Cursor/copilot/gemini parsers, SARIF output, discover subcommand
   ([`993b075`](https://github.com/thepixelabs/sanitai/commit/993b07584b0bdf659adff242f2c596b8a5bd625d))
@@ -286,8 +278,6 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
   - Add `sanitai discover` subcommand for auto-discovery - Add test fixtures and integration tests
   for new parsers
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
 - **phase-5**: Heuristic context classifier, evaluation corpus, precision/recall tool
   ([`0823332`](https://github.com/thepixelabs/sanitai/commit/08233323a70c71e5984daf23e772108974de6f2b))
 
@@ -297,8 +287,6 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
   documentation_quote/model_hallucination/unclassified) + schema + guidelines - Add
   tools/context-eval: precision/recall evaluator, exits 1 if gates fail - Export ContextClassifier
   and ContextClassifierConfig from sanitai-detectors
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 
 ## v0.1.0 (2026-04-12)

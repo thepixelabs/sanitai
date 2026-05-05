@@ -58,7 +58,8 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 0
 fi
 
-mapfile -t UNIQUE_FILES < <(printf '%s\n' "${FILES[@]}" | sort -u)
+declare -a UNIQUE_FILES=()
+while IFS= read -r f; do UNIQUE_FILES+=("$f"); done < <(printf '%s\n' "${FILES[@]}" | sort -u)
 
 declare -a EXISTING=()
 for f in "${UNIQUE_FILES[@]}"; do
