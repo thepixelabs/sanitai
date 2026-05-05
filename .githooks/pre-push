@@ -74,7 +74,7 @@ echo "[sanitai pre-push] Scanning ${#EXISTING[@]} file(s) for leaked secrets..."
 
 SCAN_ARGS=("scan")
 for f in "${EXISTING[@]}"; do
-  SCAN_ARGS+=("--file" "$f")
+  SCAN_ARGS+=("$f")
 done
 
 EXIT_CODE=0
