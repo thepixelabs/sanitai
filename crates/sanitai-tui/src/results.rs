@@ -557,15 +557,19 @@ fn render_detail_pane(
     //   * reveal on,  matched_raw empty   → historical-scan marker; we never
     //     persist secret values to disk, so a row reloaded from History has
     //     no `matched_raw` to reveal even when the setting is on.
-    let match_field = if reveal_secrets {
-        if finding.matched_raw.is_empty() {
-            "[not stored \u{2014} historical scan]".to_owned()
-        } else {
-            finding.matched_raw.clone()
-        }
+    let match_field = if finding.matched_raw.is_empty() {
+        "[not stored \u{2014} historical scan]".to_owned()
+    } else if reveal_secrets {
+        finding.matched_raw.clone()
     } else {
-        "[hidden \u{2014} toggle 'Reveal secret values' in Settings]".to_owned()
+        // Masked by default: enough to recognise `4242••••4242` as the
+        // Stripe test card, never enough to use.
+        format!(
+            "{}  (masked \u{2014} 'Reveal secret values' in Settings shows all)",
+            sanitai_core::finding::mask_secret(&finding.matched_raw)
+        )
     };
+    let why_field = sanitai_detectors::rationale_for(finding.detector_id).to_owned();
 
     // Seen: every place this same secret occurs, so the user can judge
     // blast radius without scrolling through N identical rows.
@@ -606,6 +610,7 @@ fn render_detail_pane(
         ("Location", location_field),
         ("Seen", seen_field),
         ("Match", match_field),
+        ("Why", why_field),
         ("Excerpt", excerpt_field),
         ("Role", role_text.to_owned()),
         ("Context", context_text.to_owned()),
@@ -760,6 +765,7 @@ fn context_class_label(
         ContextClass::Educational => ("Educational", muted_style),
         ContextClass::DocumentationQuote => ("DocQuote", muted_style),
         ContextClass::ModelHallucination => ("Halluc.", muted_style),
+        ContextClass::TestValue => ("TestValue", muted_style),
         ContextClass::Unclassified => ("\u{2014}", muted_style),
     }
 }
@@ -770,6 +776,7 @@ fn context_class_full(cc: &ContextClass) -> &'static str {
         ContextClass::Educational => "Educational",
         ContextClass::DocumentationQuote => "DocumentationQuote",
         ContextClass::ModelHallucination => "ModelHallucination",
+        ContextClass::TestValue => "TestValue (vendor-published example)",
         ContextClass::Unclassified => "Unclassified",
     }
 }
@@ -783,6 +790,7 @@ fn is_dimmed_context(cc: &ContextClass) -> bool {
         ContextClass::Educational
             | ContextClass::DocumentationQuote
             | ContextClass::ModelHallucination
+            | ContextClass::TestValue
     )
 }
 

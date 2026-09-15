@@ -73,16 +73,42 @@ pub(crate) struct ResultsRedactPrompt {
 }
 
 /// Active filters for the results view.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ResultsFilter {
-    /// When true, show all context classes including Educational and DocumentationQuote.
-    /// Default false: those are hidden to reduce noise.
+    /// When true, show all context classes including Educational,
+    /// DocumentationQuote and TestValue. Default false: those are hidden to
+    /// reduce noise.
     pub show_all_context: bool,
-    /// Minimum confidence to show. None = show all.
+    /// Minimum confidence to show. None = show all. Defaults to Medium: Low
+    /// is where localhost dev credentials and other "technically a secret"
+    /// matches land, and they are one keypress (`3` / `0`) away.
     pub min_confidence: Option<sanitai_core::finding::Confidence>,
     /// When false (default) rows are one-per-distinct-secret with a `×N`
     /// occurrence count; when true every occurrence gets its own row.
     pub show_every_occurrence: bool,
+}
+
+impl Default for ResultsFilter {
+    fn default() -> Self {
+        Self {
+            show_all_context: false,
+            min_confidence: Some(sanitai_core::finding::Confidence::Medium),
+            show_every_occurrence: false,
+        }
+    }
+}
+
+/// snake_case spelling of a context class — the same one the CLI writes and
+/// serde emits, so History rows carry one spelling.
+fn context_class_str(cc: &ContextClass) -> &'static str {
+    match cc {
+        ContextClass::Unclassified => "unclassified",
+        ContextClass::RealPaste => "real_paste",
+        ContextClass::Educational => "educational",
+        ContextClass::DocumentationQuote => "documentation_quote",
+        ContextClass::ModelHallucination => "model_hallucination",
+        ContextClass::TestValue => "test_value",
+    }
 }
 
 impl ResultsFilter {
@@ -91,7 +117,10 @@ impl ResultsFilter {
         if !self.show_all_context {
             use sanitai_core::finding::ContextClass;
             match &finding.context_class {
-                ContextClass::Educational | ContextClass::DocumentationQuote => return false,
+                ContextClass::Educational
+                | ContextClass::DocumentationQuote
+                | ContextClass::ModelHallucination
+                | ContextClass::TestValue => return false,
                 _ => {}
             }
         }
@@ -1161,7 +1190,7 @@ fn summary_finding_to_record(f: &sanitai_core::finding::Finding, scan_id: &str) 
         role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
         category: Some(format!("{:?}", f.category).to_lowercase()),
         entropy_score: Some(f.entropy_score),
-        context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
+        context_class: Some(context_class_str(&f.context_class).to_owned()),
         secret_hash: None,
         // v4 fields: persisted so the History → Results reload path can
         // reconstruct an actionable display row without ever storing the
@@ -1255,6 +1284,7 @@ fn finding_record_to_finding(rec: FindingRecord) -> Finding {
             "model_hallucination" | "modelhallucination" | "halluc" => {
                 ContextClass::ModelHallucination
             }
+            "test_value" | "testvalue" => ContextClass::TestValue,
             _ => ContextClass::Unclassified,
         })
         .unwrap_or(ContextClass::Unclassified);

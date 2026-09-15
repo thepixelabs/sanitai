@@ -111,15 +111,16 @@ fn exit_code_zero_on_clean_file() {
 
 #[test]
 fn exit_code_one_on_secrets_found() {
-    // secrets.jsonl contains AKIAIOSFODNN7EXAMPLE which matches the
-    // aws_access_key_id pattern and is not a synthetic key (no SANITAI_FAKE).
+    // secrets.jsonl contains a remote postgres:// URL with a real-looking
+    // password: not synthetic (no SANITAI_FAKE) and not a vendor-published
+    // example, so it is neither excluded nor classified as a TestValue.
     let (_, stderr, code) = run_scan(&[fixture("secrets.jsonl")
         .to_str()
         .expect("fixture path is valid UTF-8")]);
 
     assert_eq!(
         code, 1,
-        "expected exit 1 when an AWS access key is found; stderr: {stderr}"
+        "expected exit 1 when a database credential is found; stderr: {stderr}"
     );
 }
 

@@ -14,6 +14,11 @@ pub enum ContextClass {
     Educational,
     DocumentationQuote,
     ModelHallucination,
+    /// A value published as a test/example by its own vendor or standard:
+    /// Stripe's `4242 4242 4242 4242`, the ISO IBAN sample `GB82 WEST …`,
+    /// AWS's `AKIAIOSFODNN7EXAMPLE`, the Bitcoin genesis address. Format-
+    /// valid by construction, secret to nobody. Hidden by default.
+    TestValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +251,67 @@ pub fn dedupe_by_fingerprint(findings: &mut Vec<Finding>) {
     findings.retain(|f| seen.insert(f.fingerprint));
 }
 
+/// A display-safe rendering of a matched value: first and last few
+/// characters with the middle replaced by bullets, so a reader can recognise
+/// `4242••••••••4242` or `AKIA••••••••••••MPLE` without the report carrying
+/// a usable secret. Follows the PCI/"last four" convention: up to 4 chars
+/// each side for values of 12+ chars, 2 each side for 8–11, all bullets
+/// below that.
+pub fn mask_secret(raw: &str) -> String {
+    // `scheme://user:pass@host…`: keep user and host, mask the password.
+    if let Some((scheme, rest)) = raw.split_once("://") {
+        if let Some((userinfo, host)) = rest.rsplit_once('@') {
+            if let Some((user, pass)) = userinfo.split_once(':') {
+                // User and host already identify the credential; the
+                // password's edges add nothing, so hide it entirely.
+                let bullets = "\u{2022}".repeat(pass.chars().count().min(12));
+                return format!("{scheme}://{user}:{bullets}@{host}");
+            }
+        }
+    }
+    // `KEY=value` / `key: 'value'`: keep the key, mask the value.
+    if let Some(sep) = raw.find(['=', ':']) {
+        let (key, value) = raw.split_at(sep + 1);
+        let key_ok = key[..sep]
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'));
+        let lead = value.len() - value.trim_start().len();
+        let value = &value[lead..];
+        let quote = value
+            .chars()
+            .next()
+            .filter(|c| matches!(c, '\'' | '"' | '`'));
+        let inner = if quote.is_some() { &value[1..] } else { value };
+        if key_ok && !inner.is_empty() {
+            return format!(
+                "{key}{}{}{}",
+                &raw[sep + 1..sep + 1 + lead],
+                quote.map(String::from).unwrap_or_default(),
+                mask_value(inner)
+            );
+        }
+    }
+    mask_value(raw)
+}
+
+/// Edge-only rendering of a bare secret value: 4 chars each side from 16
+/// chars (the PCI "first/last four"), 2 from 12, nothing below that.
+fn mask_value(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let n = chars.len();
+    let keep = if n >= 16 {
+        4
+    } else if n >= 12 {
+        2
+    } else {
+        0
+    };
+    let head: String = chars[..keep].iter().collect();
+    let tail: String = chars[n - keep..].iter().collect();
+    let hidden = (n - 2 * keep).min(12);
+    format!("{head}{}{tail}", "\u{2022}".repeat(hidden))
+}
+
 /// One distinct secret and every place it was seen.
 ///
 /// Conversation exports repeat themselves: an assistant that reads a `.env`
@@ -439,6 +505,44 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!(v[0].fingerprint, [1, 2, 3, 4]);
         assert_eq!(v[1].fingerprint, [5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn mask_secret_keeps_edges_only() {
+        let b = |n: usize| "\u{2022}".repeat(n);
+        assert_eq!(mask_secret("4242424242424242"), format!("4242{}4242", b(8)));
+        assert_eq!(
+            mask_secret("AKIAIOSFODNN7EXAMPLE"),
+            format!("AKIA{}MPLE", b(12))
+        );
+        // 12–15 chars: two each side; under 12: nothing.
+        assert_eq!(mask_secret("hunter2abcde"), format!("hu{}de", b(8)));
+        assert_eq!(mask_secret("hunter2abc"), b(10));
+        assert_eq!(mask_secret("short"), b(5));
+        // Long values never reveal more than 8 chars and never grow unbounded.
+        let long = "x".repeat(200);
+        assert_eq!(mask_secret(&long).chars().count(), 4 + 12 + 4);
+    }
+
+    #[test]
+    fn mask_secret_keeps_key_and_host_masks_value() {
+        let b = |n: usize| "\u{2022}".repeat(n);
+        // Assignment: the key stays, a short value shows nothing.
+        assert_eq!(
+            mask_secret("PASSWORD=hunter22"),
+            format!("PASSWORD={}", b(8))
+        );
+        assert_eq!(
+            mask_secret("api_key: 'Xa7pQ9vR2mK4nL8zT5jB3hC6d"),
+            format!("api_key: 'Xa7p{}hC6d", b(12))
+        );
+        // URL: user and host stay, the password is masked entirely.
+        assert_eq!(
+            mask_secret("postgres://app:Xq9vR2mK4nL8@db.corp.net:5432/app"),
+            format!("postgres://app:{}@db.corp.net:5432/app", b(12))
+        );
+        // Multi-byte input is handled per char, not per byte.
+        assert_eq!(mask_secret("pässwörd=ünïcödé!!").chars().count(), 9 + 9);
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub mod turn;
 pub use chunk::{Chunk, ChunkerConfig, DetectorScratch, OffsetMap};
 pub use chunker::{chunk_turn, ChunkIter};
 pub use error::CoreError;
-pub use finding::{Confidence, ContextClass, Finding, FindingGroup, SpanKind, TransformChain};
+pub use finding::{
+    mask_secret, Confidence, ContextClass, Finding, FindingGroup, SpanKind, TransformChain,
+};
 pub use traits::{Category, ConversationParser, Detector, ReadSeek, Reconciler};
 pub use turn::{Role, SourceKind, Turn, TurnMeta};

@@ -1927,6 +1927,36 @@ pub fn display_name_for(detector_id: &str) -> &'static str {
     ""
 }
 
+/// One line explaining *why* a detector fires — the check behind the match,
+/// so a reader can judge a finding without reverse-engineering the regex.
+/// Specific text for the validated detectors, a format-based fallback for
+/// the rest.
+pub fn rationale_for(detector_id: &str) -> &'static str {
+    match detector_id {
+        "credit_card_visa" => "16 digits starting with 4 and the Luhn checksum holds",
+        "credit_card_mastercard" => {
+            "16 digits in the 51–55 or 2221–2720 range and the Luhn checksum holds"
+        }
+        "credit_card_amex" => "15 digits starting with 34/37 and the Luhn checksum holds",
+        "iban" => "country code with the registry length for that country and the mod-97 checksum holds",
+        "bitcoin_address" => "Base58 string whose Base58Check checksum holds (public address, not a key)",
+        "bitcoin_wif_private_key" => "Base58 private-key format with high entropy",
+        "ethereum_address" => "0x followed by 40 hex digits (public address, not a key)",
+        "postgres_url" | "mongodb_srv_url" | "redis_url" => {
+            "connection URL with an embedded password; graded by host (local dev hosts and default passwords rank low)"
+        }
+        "generic_password_assignment" => {
+            "password/secret/token/api_key assigned a literal value with high entropy (references, types and placeholders are ignored)"
+        }
+        "jwt" => "three base64url segments starting with eyJ (a signed token; often a public anon key)",
+        "gcp_api_key" => "AIza-prefixed Google API key format (well-known public keys are skipped)",
+        "cloudflare_api_token" => "40-char token right after a Cloudflare token assignment or Bearer header",
+        "vercel_access_token" => "24-char token right after a Vercel token assignment",
+        "pypi_token" => "pypi- macaroon prefix for pypi.org / test.pypi.org",
+        _ => "matches the provider's documented key format",
+    }
+}
+
 impl Default for RegexDetector {
     fn default() -> Self {
         Self::new()

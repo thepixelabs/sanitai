@@ -12,9 +12,11 @@ use sanitai_core::{
     chunker::chunk_turn,
     finding::{Confidence, Finding},
     traits::{ConversationParser, Detector, Sniff, SourceHint},
+    turn::Turn,
 };
 use sanitai_detectors::{
-    CrossTurnConfig, CrossTurnCorrelator, RegexDetector, TransformConfig, TransformDetector,
+    ContextClassifier, CrossTurnConfig, CrossTurnCorrelator, RegexDetector, TransformConfig,
+    TransformDetector,
 };
 use sanitai_parsers::{discover_all, ChatGptParser, ClaudeJsonlParser};
 use sanitai_sandbox::create_sandbox;
@@ -241,11 +243,14 @@ fn scan_one(
 
     let mut findings = Vec::new();
     let mut scratch = DetectorScratch::default();
-    let mut turn_count = 0usize;
+    // Keep the file's turns: the context classifier needs the surrounding
+    // conversation to tell a pasted `.env` from a tutorial or a test vector.
+    let turns: Vec<Turn> = turns_result.into_iter().flatten().collect();
+    let turn_count = turns.len();
 
-    for turn in turns_result.into_iter().flatten() {
-        turn_count += 1;
-        for chunk in chunk_turn(&turn, chunker_cfg) {
+    for turn in &turns {
+        let pre_turn_len = findings.len();
+        for chunk in chunk_turn(turn, chunker_cfg) {
             // NOTE: reset_for_chunk() clears the per-chunk decode budget.
             // The CLI does not call this (architectural debt tracked separately).
             // Calling it here makes each chunk start with a clean decode budget,
@@ -255,7 +260,12 @@ fn scan_one(
                 det.scan(&chunk, &mut scratch, &mut findings);
             }
         }
-        findings.extend(correlator.push_turn(&turn));
+        for f in &mut findings[pre_turn_len..] {
+            if f.role.is_none() {
+                f.role = Some(turn.role.clone());
+            }
+        }
+        findings.extend(correlator.push_turn(turn));
     }
 
     // Deduplicate within the file. The cross-turn correlator's sliding-window
@@ -263,6 +273,11 @@ fn scan_one(
     // entirely within one turn — same matched_raw, same detector_id, same
     // turn_idx → same fingerprint. Drop the second occurrence.
     sanitai_core::finding::dedupe_by_fingerprint(&mut findings);
+
+    let classifier = ContextClassifier::with_defaults();
+    for f in &mut findings {
+        f.context_class = classifier.classify(f, &turns);
+    }
 
     Ok((findings, turn_count))
 }

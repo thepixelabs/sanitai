@@ -10,7 +10,7 @@
 //! Security: never logs turn content. Only counts and indices.
 
 use sanitai_core::{
-    finding::{ContextClass, Finding, SpanKind},
+    finding::{Confidence, ContextClass, Finding, SpanKind},
     turn::{Role, Turn},
 };
 
@@ -72,6 +72,13 @@ impl ContextClassifier {
             return ContextClass::RealPaste;
         }
 
+        // ----- Signal: vendor-published test/example value -----
+        // Checked before everything else: Stripe's 4242… or the ISO IBAN
+        // sample are test values wherever they appear, whoever pasted them.
+        if crate::known_examples::is_known_example(finding.detector_id, &finding.matched_raw) {
+            return ContextClass::TestValue;
+        }
+
         // ----- Signal: known hallucination pattern -----
         if is_known_hallucination_pattern(&finding.matched_raw) {
             return ContextClass::ModelHallucination;
@@ -91,6 +98,14 @@ impl ContextClassifier {
         // ----- Score real-paste signals -----
         let is_user_role = matches!(finding_turn.role, Role::User);
         let is_high_entropy = finding.entropy_score >= self.config.high_entropy_threshold;
+
+        // A High-confidence value the user typed themselves is never demoted
+        // to Educational/DocumentationQuote: a docs URL three turns back or
+        // the word "format" nearby is not evidence that `sk_live_…` is a
+        // quote. Vendor test values were already claimed above.
+        if is_user_role && matches!(finding.confidence, Confidence::High) {
+            return ContextClass::RealPaste;
+        }
 
         // ----- Decision logic -----
 
@@ -369,10 +384,10 @@ mod tests {
             mk_turn(
                 1,
                 Role::Assistant,
-                "AWS access keys look like this sample: AKIAZZZZZZZZZZZZZZZZ\nFor example, the format is AKIA followed by 16 characters.",
+                "AWS access keys look like this sample: AKIAJ5Q3Z7MX4PB2LQ9K\nFor example, the format is AKIA followed by 16 characters.",
             ),
         ];
-        let finding = mk_finding(1, "AKIAZZZZZZZZZZZZZZZZ");
+        let finding = mk_finding(1, "AKIAJ5Q3Z7MX4PB2LQ9K");
         let classifier = ContextClassifier::with_defaults();
         assert_eq!(
             classifier.classify(&finding, &turns),
@@ -380,14 +395,68 @@ mod tests {
         );
     }
 
+    /// The classic hallucinated placeholders (`ghp_xxx…`, the AWS docs key)
+    /// are all vendor-example / repeated-character shapes, so the TestValue
+    /// rule claims them first; both classes are hidden by default.
     #[test]
     fn known_hallucination_pattern_classified_correctly() {
-        let turns = vec![mk_turn(0, Role::Assistant, "Here: AKIAIOSFODNN7EXAMPLE")];
-        let finding = mk_finding(0, "AKIAIOSFODNN7EXAMPLE");
+        let turns = vec![mk_turn(
+            0,
+            Role::Assistant,
+            "Here: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        )];
+        let finding = mk_finding(0, "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
         let classifier = ContextClassifier::with_defaults();
         assert_eq!(
             classifier.classify(&finding, &turns),
-            ContextClass::ModelHallucination
+            ContextClass::TestValue
+        );
+        assert!(is_known_hallucination_pattern(
+            "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ));
+    }
+
+    /// A High-confidence secret in the user's own turn stays visible even when
+    /// a docs URL and inline code would otherwise make it a DocumentationQuote.
+    #[test]
+    fn high_confidence_user_paste_is_never_demoted() {
+        let turns = vec![mk_turn(
+            0,
+            Role::User,
+            "I followed https://docs.example.com/keys and set `pay_live_51Hx9QzTbP4mWc2LrJ8nVdKu` in prod, still 401",
+        )];
+        let mut finding = mk_finding(0, "pay_live_51Hx9QzTbP4mWc2LrJ8nVdKu");
+        finding.confidence = Confidence::High;
+        let classifier = ContextClassifier::with_defaults();
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::RealPaste
+        );
+        // Medium keeps the existing DocumentationQuote behaviour.
+        finding.confidence = Confidence::Medium;
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::DocumentationQuote
+        );
+    }
+
+    /// Vendor-published example values win over every other signal: the AWS
+    /// docs key is a TestValue whether the user pasted it or the model did.
+    #[test]
+    fn vendor_example_value_is_test_value_regardless_of_context() {
+        let classifier = ContextClassifier::with_defaults();
+        let turns = vec![mk_turn(0, Role::User, "prod key: AKIAIOSFODNN7EXAMPLE")];
+        let finding = mk_finding(0, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::TestValue
+        );
+        let turns = vec![mk_turn(0, Role::User, "card 4242 4242 4242 4242")];
+        let mut finding = mk_finding(0, "4242424242424242");
+        finding.detector_id = "credit_card_visa";
+        assert_eq!(
+            classifier.classify(&finding, &turns),
+            ContextClass::TestValue
         );
     }
 
@@ -428,9 +497,9 @@ mod tests {
         let turns = vec![mk_turn(
             0,
             Role::Assistant,
-            "From the docs.stripe.com documentation: use `sk_test_4eC39HqLyjWDarjtT1zdp7dc` for testing.",
+            "From the docs.example.com documentation: use `pay_test_51H8ZbqKZvKuzHGXbTCaqbmWc` for testing.",
         )];
-        let finding = mk_finding(0, "sk_test_4eC39HqLyjWDarjtT1zdp7dc");
+        let finding = mk_finding(0, "pay_test_51H8ZbqKZvKuzHGXbTCaqbmWc");
         let classifier = ContextClassifier::with_defaults();
         assert_eq!(
             classifier.classify(&finding, &turns),

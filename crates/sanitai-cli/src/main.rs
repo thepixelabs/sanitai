@@ -24,7 +24,7 @@ use sanitai_core::{
     chunk::{ChunkerConfig, DetectorScratch},
     chunker::chunk_turn,
     config::RedactMode,
-    finding::{Confidence, Finding, SpanKind, Transform, TransformChain},
+    finding::{Confidence, ContextClass, Finding, SpanKind, Transform, TransformChain},
     traits::{ConversationParser, Detector, Sniff, SourceHint},
     CoreError, ReadSeek, Turn,
 };
@@ -120,10 +120,11 @@ struct ScanArgs {
     #[arg(long, hide = true)]
     no_sandbox: bool,
 
-    /// Show all findings including educational and documentation-quote classifications.
-    /// By default, findings classified as Educational or DocumentationQuote are hidden
-    /// from human output and the exit-code decision. JSON/SARIF output is unaffected —
-    /// consumers filter using the `context_class` field.
+    /// Show every finding, including those classified as a vendor test value,
+    /// educational example, documentation quote or model placeholder. By default
+    /// those four classes are hidden from human output and the exit-code decision.
+    /// JSON/SARIF output is unaffected — consumers filter using the `context_class`
+    /// field.
     #[arg(long)]
     show_all: bool,
 }
@@ -208,6 +209,12 @@ struct FindingJson {
     /// can ignore it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     excerpt: String,
+    /// Context classification (`unclassified`, `real_paste`, `educational`,
+    /// `documentation_quote`, `model_hallucination`, `test_value`). Human
+    /// output hides everything but `unclassified`/`real_paste` by default;
+    /// JSON carries every finding and lets consumers apply their own policy.
+    #[serde(default)]
+    context_class: String,
 }
 
 impl From<&Finding> for FindingJson {
@@ -244,7 +251,21 @@ impl From<&Finding> for FindingJson {
             synthetic: f.synthetic,
             fingerprint: f.fingerprint_hex(),
             excerpt: f.excerpt.clone(),
+            context_class: context_class_str(&f.context_class).to_owned(),
         }
+    }
+}
+
+/// snake_case name of a context class — the same spelling serde uses for
+/// `Finding` and the store persists.
+fn context_class_str(cc: &ContextClass) -> &'static str {
+    match cc {
+        ContextClass::Unclassified => "unclassified",
+        ContextClass::RealPaste => "real_paste",
+        ContextClass::Educational => "educational",
+        ContextClass::DocumentationQuote => "documentation_quote",
+        ContextClass::ModelHallucination => "model_hallucination",
+        ContextClass::TestValue => "test_value",
     }
 }
 
@@ -537,10 +558,12 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         all_findings
             .iter()
             .filter(|f| {
-                use sanitai_core::finding::ContextClass;
                 !matches!(
                     f.context_class,
-                    ContextClass::Educational | ContextClass::DocumentationQuote
+                    ContextClass::Educational
+                        | ContextClass::DocumentationQuote
+                        | ContextClass::ModelHallucination
+                        | ContextClass::TestValue
                 )
             })
             .cloned()
@@ -636,7 +659,7 @@ fn finding_to_record(f: &Finding, scan_id: &str) -> FindingRecord {
         role: f.role.as_ref().map(|r| format!("{r:?}").to_lowercase()),
         category: Some(format!("{:?}", f.category).to_lowercase()),
         entropy_score: Some(f.entropy_score),
-        context_class: Some(format!("{:?}", f.context_class).to_lowercase()),
+        context_class: Some(context_class_str(&f.context_class).to_owned()),
         // secret_hash is computed by the store layer with the installation
         // key in a later phase; None for now.
         secret_hash: None,
@@ -711,20 +734,24 @@ fn scan_path(
 
     let mut findings: Vec<Finding> = Vec::new();
     let mut scratch = DetectorScratch::default();
-    let mut turn_count: usize = 0;
 
-    for turn_result in turns {
-        let turn = match turn_result {
-            Ok(t) => t,
+    // Keep the file's turns: the context classifier needs the surrounding
+    // conversation to tell a pasted `.env` from a tutorial or a test vector.
+    let turns: Vec<Turn> = turns
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok(t) => Some(t),
             Err(e) => {
                 tracing::warn!(path = %path.display(), "turn error: {e}");
-                continue;
+                None
             }
-        };
-        turn_count += 1;
+        })
+        .collect();
+    let turn_count = turns.len();
 
+    for turn in &turns {
         let pre_turn_len = findings.len();
-        for chunk in chunk_turn(&turn, chunker_cfg) {
+        for chunk in chunk_turn(turn, chunker_cfg) {
             for det in detectors {
                 det.scan(&chunk, &mut scratch, &mut findings);
             }
@@ -744,9 +771,14 @@ fn scan_path(
         // Any finding whose match spans a prior turn's tail + this turn's
         // head is returned here with SpanKind::CrossTurn.
         if let Some(corr) = correlator.as_deref_mut() {
-            let cross_findings = corr.push_turn(&turn);
+            let cross_findings = corr.push_turn(turn);
             findings.extend(cross_findings);
         }
+    }
+
+    let classifier = sanitai_detectors::ContextClassifier::with_defaults();
+    for f in &mut findings {
+        f.context_class = classifier.classify(f, &turns);
     }
 
     Ok((findings, turn_count))
@@ -903,7 +935,14 @@ fn print_human(findings: &[Finding]) {
                 if files == 1 { "" } else { "s" }
             )
         };
-        println!("[{conf}] {det}  [{fp}]{where_}");
+        // Masked value so the reader can recognise `4242••••••••4242` or
+        // `AKIA••••••••••••MPLE` at a glance; the full value is never printed.
+        let masked = sanitai_core::finding::mask_secret(&f.matched_raw);
+        println!("[{conf}] {det}  {masked}  [{fp}]{where_}");
+        println!(
+            "         why: {}",
+            sanitai_detectors::rationale_for(f.detector_id)
+        );
         for occ in g.occurrences.iter().take(MAX_LOCATIONS) {
             println!("         {}", human_location(occ));
         }
