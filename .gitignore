@@ -1,0 +1,86 @@
+# Build artifacts
+/target/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+**/.DS_Store
+
+# Compiled binary at repo root (convenience copy)
+/sanitai
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Claude Code artifacts (settings, memory, worktree metadata)
+.claude/
+# Multi-agent blackboard
+.tasks/
+# Aider
+.aider*
+
+# Rust tooling outputs
+**/*.rs.bk
+**/*.orig
+cargo-timing*.html
+**/*.pdb
+**/*.profraw
+**/*.profdata
+
+# Release artifacts (built locally or by CI, never source-tracked)
+dist/
+*.tar.gz
+*.zip
+*.dmg
+*.pkg
+*.msi
+*.AppImage
+*.deb
+*.rpm
+
+# Cargo credentials (distinct from config.toml which is intentionally tracked)
+.cargo/credentials
+.cargo/credentials.toml
+
+# Scratch / personal notes not belonging to this project
+vedox/
+generate_nix.py
+
+# Local MCP server config (per-developer, references localhost)
+.mcp.json
+
+# Cryptographic key material and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+cosign.key
+
+# Loose image files (design/marketing assets; exceptions for landing page below)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+# Landing page assets — tracked intentionally (see scripts/optimize-mascots.py)
+!docs/index.html
+!docs/nix-hero.png
+!docs/nix-hero.webp
+!docs/nix-hero.avif
+!docs/nix-stories.png
+!docs/nix-stories.webp
+!docs/nix-stories.avif
+!docs/nix-cta.png
+!docs/nix-cta.webp
+!docs/nix-cta.avif
+!docs/nix-readme.png
+!docs/nix-float.svg
+# Internal planning documents — keep out of public history
+docs/planning/

@@ -1,0 +1,34 @@
+[package]
+name    = "sanitai-cli"
+version.workspace = true
+edition = "2021"
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sanitai"
+path = "src/main.rs"
+
+[dependencies]
+sanitai-core      = { path = "../sanitai-core" }
+sanitai-detectors = { path = "../sanitai-detectors" }
+sanitai-parsers   = { path = "../sanitai-parsers" }
+sanitai-redactor  = { path = "../sanitai-redactor" }
+sanitai-sandbox   = { path = "../sanitai-sandbox" }
+sanitai-store     = { path = "../sanitai-store" }
+sanitai-tui       = { path = "../sanitai-tui" }
+ulid              = { workspace = true }
+clap              = { workspace = true }
+anyhow            = { workspace = true }
+tracing           = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde             = { workspace = true }
+serde_json        = { workspace = true }
+dirs-next         = { workspace = true }
+walkdir           = { workspace = true }
+futures           = { workspace = true }
+
+[dev-dependencies]
+sanitai-fixtures = { path = "../sanitai-fixtures" }
+tempfile         = { workspace = true }
+serde_json       = { workspace = true }

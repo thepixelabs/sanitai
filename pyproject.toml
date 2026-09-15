@@ -1,0 +1,59 @@
+# This file configures python-semantic-release for automated versioning.
+# SanitAI is a Rust project — this file is NOT a Python build config.
+
+[tool.semantic_release]
+version_toml = ["Cargo.toml:workspace.package.version"]
+branch = "main"
+commit_parser = "angular"
+tag_format = "v{version}"
+changelog_file = "CHANGELOG.md"
+# After bumping workspace.package.version, regenerate Cargo.lock so the version
+# bump commit also updates every workspace-member entry in the lockfile. Without
+# this, the tagged commit has a stale Cargo.lock and every subsequent `cargo
+# --locked` build on that tag fails (e.g. the build-release workflow).
+#
+# NOTE: python-semantic-release will not auto-stage files modified by
+# build_command — we must `git add` the lockfile explicitly here so it is
+# picked up by the version-bump commit. `set -e` ensures a failed cargo
+# update aborts the release rather than producing a tag with stale lockfile.
+build_command = "set -e && cargo update --workspace && git add Cargo.lock"
+
+[tool.semantic_release.commit_parser_options]
+# Release rules mirror altergo's config:
+#   feat       → minor
+#   fix        → patch
+#   perf       → patch
+#   refactor   → patch
+#   revert     → patch
+# Everything else (docs, style, test, build, ci, chore) → no release
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor", "revert"]
+
+[tool.semantic_release.changelog]
+# `update` prepends each new version at the insertion flag and leaves the
+# rest of CHANGELOG.md alone, so the file stays hand-curatable. The vendored
+# templates in templates/ render commit *subjects only* — the upstream default
+# pastes whole commit bodies into the changelog and the GitHub release notes.
+mode = "update"
+insertion_flag = "<!-- version list -->"
+template_dir = "templates"
+exclude_commit_patterns = [
+    "^style",
+    "^test",
+    "^build",
+    "^ci",
+    "^chore",
+]
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.publish]
+upload_to_pypi = false
+upload_to_release = true
+
+[tool.semantic_release.remote]
+type = "github"
+
+[tool.semantic_release.remote.token]
+env = "GH_TOKEN"

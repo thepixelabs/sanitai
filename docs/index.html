@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <script>
+    (function(){
+      var t = null;
+      try { t = localStorage.getItem('px-theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SanitAI — Scan LLM Conversation History for Leaked API Keys &amp; Credentials</title>
+  <meta name="description" content="Free CLI tool that scans your local LLM conversation history for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account required." />
+  <meta name="theme-color" content="#0D0E14" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#F1EDF5" media="(prefers-color-scheme: light)" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="canonical" href="https://sanitai.dev/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="SanitAI — Your local LLM conversation history contains credentials." />
+  <meta property="og:description" content="Free CLI that scans your local LLM conversation history for leaked API keys, database credentials, and PII. 100% offline. No telemetry. No account." />
+  <meta property="og:url" content="https://sanitai.dev/" />
+  <meta property="og:image" content="https://sanitai.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="SanitAI terminal scan output — detecting a leaked AWS access key in a local LLM conversation history file" />
+  <meta property="og:site_name" content="SanitAI by Pixelabs" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="SanitAI — Your local LLM conversation history contains credentials." />
+  <meta name="twitter:description" content="Free CLI. Scans your local LLM conversation history for leaked API keys and PII. 100% offline. No telemetry." />
+  <meta name="twitter:image" content="https://sanitai.dev/og-image.png" />
+  <meta name="twitter:image:alt" content="SanitAI terminal scan output detecting a leaked API key in a local LLM conversation history file" />
+
+  <meta name="robots" content="index, follow" />
+
+  <!-- Structured Data: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "SanitAI",
+    "applicationCategory": "DeveloperApplication",
+    "applicationSubCategory": "SecurityApplication",
+    "operatingSystem": "macOS, Linux",
+    "softwareVersion": "0.1.0",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "CLI tool that scans local LLM conversation history files for leaked API keys, database credentials, and PII. Runs entirely locally with no telemetry.",
+    "url": "https://sanitai.dev/",
+    "downloadUrl": "https://github.com/thepixelabs/sanitai/releases",
+    "installUrl": "https://sanitai.dev/#install",
+    "codeRepository": "https://github.com/thepixelabs/sanitai",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": { "@type": "Organization", "name": "Pixelabs", "url": "https://sanitai.dev/" }
+  }
+  </script>
+
+  <!-- Structured Data: FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Does SanitAI send my conversations to any server?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. SanitAI runs entirely on your local machine. Your conversation exports never leave your filesystem. There is no telemetry, no analytics, no network calls of any kind at runtime. Verify with strace or fs_usage." }
+      },
+      {
+        "@type": "Question",
+        "name": "What types of secrets can SanitAI detect?",
+        "acceptedAnswer": { "@type": "Answer", "text": "SanitAI detects API keys for AWS, GCP, Azure, Stripe, Twilio, OpenAI, Anthropic, and GitHub; database connection strings (PostgreSQL, MySQL, MongoDB); PEM private keys and SSH keys; bearer tokens; and PII including email addresses and phone numbers. Custom YAML rules are supported." }
+      },
+      {
+        "@type": "Question",
+        "name": "Which LLM conversation sources are supported?",
+        "acceptedAnswer": { "@type": "Answer", "text": "SanitAI auto-discovers Claude Code session files (~/.claude/projects/**/*.jsonl), Claude Desktop conversation JSON files, and Cursor workspace SQLite databases. You can also point it at any file or directory, or pipe content via stdin. No export or download required." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I run SanitAI in a CI/CD pipeline?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. SanitAI exits with code 1 when findings are present, making it compatible with any CI/CD system. Use --format json for machine-readable output and --exit-zero for non-blocking canary scans." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I suppress false positives?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Disable specific detectors in ~/.config/sanitai/config.toml using disable_detectors = ['email_address']. Custom rules support context_keywords to narrow pattern matching and reduce false positives for your environment." }
+      }
+    ]
+  }
+  </script>
+
+  <!-- Plausible Analytics -->
+  <script defer data-domain="sanitai.dev" src="https://plausible.io/js/script.tagged-events.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ============================================================
+       DESIGN TOKENS
+       Every component reads from this layer. No hex / px literals
+       below this block except inside the token definitions.
+       Dark is the primary theme; light is a tinted "paper terminal".
+    ============================================================ */
+    :root {
+      color-scheme: dark;
+
+      /* Surfaces (darkest → most elevated) */
+      --bg-0:        #0D0E14;   /* page */
+      --bg-1:        #12141B;   /* alternate section band */
+      --bg-2:        #181A23;   /* card */
+      --bg-3:        #1F2230;   /* inset: inputs, code chips */
+      --nav-bg:      rgba(13, 14, 20, 0.78);
+
+      /* Ink */
+      --text-1:      #EEF0F6;   /* 16.9:1 on bg-0 */
+      --text-2:      #C4C8D4;   /* 11.5:1 */
+      --text-3:      #8C92A6;   /*  6.2:1 on bg-0, 5.6:1 on bg-2 */
+
+      /* Brand — fill vs. text variants are separate on purpose: the
+         fill hue is the brand, the text hue is the one that passes AA. */
+      --accent:      #BE48E0;   /* decoration, borders, fills */
+      --accent-text: #CF62F0;   /* 6.1:1 on bg-0, 5.5:1 on bg-2 */
+      --accent-fill: #A83AD0;   /* button fill: white text 5.0:1 */
+      --accent-fill-hover: #B84CE0;
+      --on-accent:   #FFFFFF;   /* text on accent-fill: 5.0:1 dark / 8.1:1 light */
+      --pink:        #FF1493;
+      --pink-text:   #FF4DAA;   /* 6.3:1 */
+      --acid:        #39FF14;
+      --acid-text:   #39FF14;   /* 14.2:1 */
+      --warn-text:   #E0C020;
+
+      /* Tints (fills behind accent text) */
+      --tint-accent: rgba(190, 72, 224, 0.12);
+      --tint-acid:   rgba(57, 255, 20, 0.08);
+      --tint-pink:   rgba(255, 20, 147, 0.10);
+      --tint-muted:  rgba(140, 146, 166, 0.12);
+      --glow-acid:   rgba(57, 255, 20, 0.16);
+      --glow-accent: rgba(190, 72, 224, 0.28);
+
+      /* Lines */
+      --line:        rgba(190, 72, 224, 0.22);
+      --line-soft:   rgba(238, 240, 246, 0.07);
+      --line-strong: rgba(190, 72, 224, 0.45);
+      --ring:        #39FF14;
+
+      /* Terminal is always dark — it is a screen, not a surface */
+      --term-bg:     #0A0B10;
+      --term-bar:    #12141B;
+      --term-fg:     #EEF0F6;
+      --term-meta:   #8C92A6;
+      --term-dim:    #7B819A;
+      --term-acid:   #39FF14;
+      --term-pink:   #FF4DAA;
+      --term-accent: #CF62F0;
+      --term-low:    #E0C020;
+      --term-line:   rgba(238, 240, 246, 0.08);
+      --term-dot-red:   #FF5F57;
+      --term-dot-amber: #FEBC2E;
+      --term-dot-green: #28C840;
+
+      /* Shadows */
+      --shadow-card:  0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 28px rgba(0, 0, 0, 0.35);
+      --shadow-pop:   0 12px 40px rgba(0, 0, 0, 0.55);
+      --shadow-btn:   0 0 0 1px rgba(190, 72, 224, 0.35), 0 4px 18px rgba(190, 72, 224, 0.35);
+      --shadow-mascot: drop-shadow(0 14px 32px rgba(0, 0, 0, 0.55));
+      --ground-shadow: rgba(0, 0, 0, 0.55);
+      --aurora-opacity: 0.13;
+
+      /* Spacing scale (4px base) */
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.5rem;
+      --space-6: 2rem;
+      --space-7: 3rem;
+      --space-8: 4rem;
+      --section-pad: clamp(3.5rem, 8vw, 6rem);
+      --grid-gap: clamp(1rem, 2.5vw, 1.5rem);
+      --container: 1080px;
+      --container-wide: 1160px;
+      --gutter: clamp(1rem, 4vw, 1.5rem);
+
+      /* Radius */
+      --radius-sm: 6px;
+      --radius:    12px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+
+      /* Type */
+      --font-display: 'Press Start 2P', 'Courier New', monospace;
+      --font-ui:      'Pixelify Sans', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --fs-eyebrow:   0.7rem;
+      --fs-mono-sm:   0.78rem;
+      --fs-mono:      0.84rem;
+      --fs-body-sm:   0.9375rem;
+      --fs-body:      1.0625rem;
+      --fs-lead:      clamp(1.0625rem, 1.6vw, 1.15rem);
+      --fs-h2:        clamp(1.6rem, 3vw, 2.25rem);
+      --fs-h1:        clamp(1.35rem, 2.6vw, 1.75rem);
+      --lh-tight:     1.25;
+      --lh-display:   1.5;
+      --lh-body:      1.7;
+
+      /* Motion contract: durations only; choreography lives with vesper */
+      --dur-fast:  150ms;
+      --dur-base:  250ms;
+      --dur-slow:  600ms;
+      --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+
+      --bg-0:        #F1EDF5;   /* lavender-tinted paper, never #FFFFFF */
+      --bg-1:        #E8E3EF;
+      --bg-2:        #F8F6FA;
+      --bg-3:        #E2DCEA;
+      --nav-bg:      rgba(241, 237, 245, 0.84);
+
+      --text-1:      #1C1A2E;   /* 14.7:1 on bg-0 */
+      --text-2:      #403C58;   /*  9.1:1 */
+      --text-3:      #5F5B78;   /*  5.6:1 on bg-0, 5.1:1 on bg-1 */
+
+      --accent:      #8A1FB8;   /* 6.1:1 on bg-0 */
+      --accent-text: #8A1FB8;
+      --accent-fill: #7A1FA8;   /* white text 8.1:1 */
+      --accent-fill-hover: #6A1594;
+      --pink:        #B8106A;   /* 5.5:1 */
+      --pink-text:   #B8106A;
+      --acid:        #1B7A2E;
+      --acid-text:   #166B29;   /* 5.7:1 on bg-0, 5.3:1 on bg-1 */
+      --warn-text:   #7A5A00;
+
+      --tint-accent: rgba(138, 31, 184, 0.10);
+      --tint-acid:   rgba(22, 107, 41, 0.10);
+      --tint-pink:   rgba(184, 16, 106, 0.09);
+      --tint-muted:  rgba(95, 91, 120, 0.12);
+      --glow-acid:   rgba(27, 122, 46, 0.14);
+      --glow-accent: rgba(138, 31, 184, 0.16);
+
+      --line:        rgba(74, 30, 110, 0.20);
+      --line-soft:   rgba(28, 26, 46, 0.09);
+      --line-strong: rgba(74, 30, 110, 0.38);
+      --ring:        #8A1FB8;
+
+      --term-bg:     #16142A;
+      --term-bar:    #201D38;
+      --term-meta:   #A9AEC4;
+      --term-dim:    #9A9FB8;
+
+      --shadow-card:  0 1px 0 rgba(255,255,255,0.6) inset, 0 6px 22px rgba(60, 30, 90, 0.10);
+      --shadow-pop:   0 12px 36px rgba(60, 30, 90, 0.22);
+      --shadow-btn:   0 0 0 1px rgba(122, 31, 168, 0.25), 0 4px 16px rgba(122, 31, 168, 0.28);
+      --shadow-mascot: drop-shadow(0 12px 28px rgba(50, 20, 80, 0.30));
+      --ground-shadow: rgba(50, 20, 80, 0.32);
+      --aurora-opacity: 0.09;
+    }
+
+    /* ============================================================
+       RESET & BASE
+    ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: var(--font-ui);
+      font-size: 1rem;
+      background: var(--bg-0);
+      color: var(--text-1);
+      line-height: var(--lh-body);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; height: auto; }
+    button { cursor: pointer; font-family: inherit; border: none; background: none; color: inherit; }
+    ul { list-style: none; }
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    [id] { scroll-margin-top: 5rem; }
+
+    :focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: 3px;
+      border-radius: var(--radius-sm);
+    }
+
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+
+    /* Reduced motion: zero every duration through the token layer, then
+       hard-stop any animation that slipped past. */
+    @media (prefers-reduced-motion: reduce) {
+      :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ============================================================
+       ACCESSIBILITY: SKIP LINK
+    ============================================================ */
+    .skip-link {
+      position: absolute; top: -100%; left: var(--space-4);
+      background: var(--accent-fill); color: var(--on-accent);
+      padding: var(--space-2) var(--space-4); border-radius: var(--radius);
+      font-family: var(--font-mono); font-size: var(--fs-mono);
+      z-index: 9999; transition: top var(--dur-base);
+    }
+    .skip-link:focus { top: var(--space-4); }
+
+    /* ============================================================
+       LAYOUT
+    ============================================================ */
+    .container {
+      width: 100%;
+      max-width: var(--container);
+      margin-inline: auto;
+      padding-inline: var(--gutter);
+    }
+    .container--wide { max-width: var(--container-wide); }
+    .container--narrow { max-width: 900px; }
+
+    /* ============================================================
+       AURORA BACKGROUND (only visible through open sections)
+    ============================================================ */
+    .aurora { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+    .aurora-orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: var(--aurora-opacity); }
+    .aurora-orb--purple { width: 600px; height: 600px; background: var(--accent); top: -200px; left: -150px; }
+    .aurora-orb--pink   { width: 500px; height: 500px; background: var(--pink);   top: -100px; right: -150px; }
+    .aurora-orb--green  { width: 400px; height: 400px; background: var(--acid);   bottom: -100px; left: 50%; transform: translateX(-50%); }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .aurora-orb--purple { animation: drift-a 22s ease-in-out infinite alternate; }
+      .aurora-orb--pink   { animation: drift-b 28s ease-in-out infinite alternate; }
+      .aurora-orb--green  { animation: drift-c 18s ease-in-out infinite alternate; }
+      @keyframes drift-a { from { transform: translate(0,0); } to { transform: translate(50px, 40px); } }
+      @keyframes drift-b { from { transform: translate(0,0); } to { transform: translate(-40px, 30px); } }
+      @keyframes drift-c { from { transform: translateX(-50%) translate(0,0); } to { transform: translateX(-50%) translate(30px, -40px); } }
+    }
+
+    /* ============================================================
+       TYPE TREATMENTS
+    ============================================================ */
+    .glitch-text { filter: drop-shadow(-2px 0 0 var(--pink)) drop-shadow(2px 0 0 var(--acid)); }
+    .accent { color: var(--accent-text); }
+
+    .code {
+      font-family: var(--font-mono);
+      font-size: 0.82em;
+      color: var(--acid-text);
+      background: var(--tint-acid);
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      overflow-wrap: anywhere;
+    }
+
+    /* ============================================================
+       CARD
+       Base card = surface + 1px line. The animated gradient border is a
+       modifier reserved for the primary CTA (install blocks) and the Nix
+       speech bubble. It is drawn with a two-layer background — padding-box
+       surface over a border-box gradient — so it never needs a pseudo
+       element and never fights a stacking context.
+    ============================================================ */
+    .card {
+      position: relative;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+    }
+    .card-inner { position: relative; padding: var(--space-5); height: 100%; }
+
+    .card--glow {
+      border-color: transparent;
+      background:
+        linear-gradient(var(--bg-2), var(--bg-2)) padding-box,
+        linear-gradient(90deg, var(--accent), var(--pink), var(--acid), var(--accent)) border-box;
+      background-size: 100% 100%, 300% 100%;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .card--glow { animation: border-shift 7s linear infinite; }
+      @keyframes border-shift { to { background-position: 0 0, 300% 0; } }
+    }
+
+    /* ============================================================
+       BUTTONS
+       States: default · hover · focus-visible · active · disabled
+    ============================================================ */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4em;
+      font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 500;
+      padding: 0.7rem 1.4rem;
+      min-height: 44px;
+      border-radius: var(--radius);
+      background: var(--accent-fill);
+      color: var(--on-accent);
+      box-shadow: var(--shadow-btn);
+      transition: background var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--accent-fill-hover); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn[aria-disabled="true"], .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .btn--ghost {
+      background: transparent;
+      color: var(--accent-text);
+      box-shadow: none;
+      border: 1px solid var(--line-strong);
+    }
+    .btn--ghost:hover { background: var(--tint-accent); }
+    .btn--sm { font-size: var(--fs-mono-sm); padding: 0.45rem 0.95rem; min-height: 38px; }
+
+    /* ============================================================
+       NAV
+    ============================================================ */
+    .nav {
+      position: sticky; top: 0; z-index: 100;
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      background: var(--nav-bg);
+    }
+    .nav__inner {
+      display: flex; align-items: center; justify-content: space-between;
+      min-height: 64px;
+      gap: var(--space-4);
+    }
+    .nav__logo {
+      font-family: var(--font-ui);
+      font-size: 1.35rem; font-weight: 700;
+      letter-spacing: 0.01em;
+      color: var(--text-1);
+      flex-shrink: 0;
+    }
+    .nav__logo:hover { filter: drop-shadow(-2px 0 0 var(--pink)) drop-shadow(2px 0 0 var(--acid)); }
+    .nav__right { display: flex; align-items: center; gap: var(--space-4); }
+    .nav__links { display: flex; align-items: center; gap: var(--space-5); }
+    .nav__link {
+      font-family: var(--font-ui);
+      font-size: 1rem; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--text-2);
+      padding: 0.35rem 0;
+      border-bottom: 2px solid transparent;
+      transition: color var(--dur-fast), border-color var(--dur-fast);
+    }
+    .nav__link:hover { color: var(--text-1); border-bottom-color: var(--acid); }
+
+    /* Theme switch — segmented, labelled, both options always visible.
+       States per option: pressed · unpressed · hover · focus-visible */
+    .theme-switch {
+      display: inline-flex; align-items: center;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-pill);
+      background: var(--bg-3);
+      gap: 2px;
+    }
+    .theme-switch__btn {
+      display: inline-flex; align-items: center; gap: 0.35em;
+      font-family: var(--font-mono); font-size: var(--fs-mono-sm); font-weight: 500;
+      line-height: 1;
+      color: var(--text-3);
+      padding: 0.4rem 0.7rem;
+      min-height: 32px;
+      border-radius: var(--radius-pill);
+      transition: color var(--dur-fast), background var(--dur-fast);
+    }
+    .theme-switch__btn:hover { color: var(--text-1); }
+    .theme-switch__btn[aria-pressed="true"] {
+      color: var(--on-accent);
+      background: var(--accent-fill);
+    }
+    .theme-switch__btn:focus-visible { outline-offset: 1px; }
+    .theme-switch__glyph { font-size: 0.95rem; }
+
+    /* ============================================================
+       HERO
+    ============================================================ */
+    .hero {
+      padding-block: clamp(3rem, 7vw, 5.5rem) clamp(3rem, 7vw, 5rem);
+      position: relative;
+    }
+    .hero__grid {
+      display: grid;
+      /* minmax(0, …) so a long unbreakable install URL can't widen the column past the viewport */
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+      gap: clamp(2rem, 5vw, 4rem);
+      align-items: end;
+    }
+    .hero__left { min-width: 0; }
+    .hero__eyebrow {
+      font-family: var(--font-mono);
+      font-size: var(--fs-eyebrow);
+      color: var(--text-3);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: var(--space-4);
+      display: flex; align-items: center; gap: 0.6rem;
+    }
+    .hero__eyebrow::before {
+      content: ''; width: 8px; height: 8px; border-radius: 2px;
+      background: var(--acid); box-shadow: 0 0 10px var(--acid);
+      flex-shrink: 0;
+    }
+    .hero__h1 {
+      font-family: var(--font-display);
+      font-size: var(--fs-h1);
+      line-height: var(--lh-display);
+      color: var(--text-1);
+      margin-bottom: var(--space-5);
+      text-wrap: balance;
+    }
+    .hero__sub {
+      font-family: var(--font-ui);
+      font-size: var(--fs-lead);
+      color: var(--text-2);
+      max-width: 56ch;
+      margin-bottom: var(--space-5);
+      line-height: var(--lh-body);
+    }
+    .trust-strip { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-6); }
+    .trust-pill {
+      font-family: var(--font-mono);
+      font-size: var(--fs-eyebrow);
+      color: var(--acid-text);
+      border: 1px solid var(--acid-text);
+      background: var(--tint-acid);
+      border-radius: var(--radius-pill);
+      padding: 0.3rem 0.75rem;
+      white-space: nowrap;
+    }
+
+    /* Install block — the primary CTA. Reused in the hero and #install. */
+    .install-block {
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-bottom: 0;
+    }
+    .install-row {
+      display: flex; align-items: stretch;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .install-row:last-child { border-bottom: none; }
+    .install-code {
+      flex: 1;
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: var(--fs-mono-sm);
+      color: var(--text-1);
+      line-height: 1.6;
+      min-width: 0;
+    }
+    .install-code .comment { color: var(--text-3); }
+    .install-code .cmd { color: var(--acid-text); overflow-wrap: anywhere; }
+
+    /* Copy button — states: idle · hover · focus-visible · busy · success · error */
+    .copy-btn {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-3);
+      padding: 0 0.9rem;
+      border-left: 1px solid var(--line-soft);
+      background: transparent;
+      transition: color var(--dur-fast), background var(--dur-fast);
+      white-space: nowrap;
+      min-width: 64px;
+      min-height: 44px;
+    }
+    .copy-btn:hover { color: var(--acid-text); background: var(--tint-acid); }
+    .copy-btn:focus-visible { outline-offset: -3px; }
+    .copy-btn[aria-busy="true"] { color: var(--text-3); cursor: progress; }
+    .copy-btn.is-success { color: var(--acid-text); background: var(--tint-acid); }
+    .copy-btn.is-error { color: var(--pink-text); background: var(--tint-pink); }
+
+    .install-block__foot {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+      padding: 0.65rem 1rem;
+      border-top: 1px solid var(--line-soft);
+      background: var(--tint-muted);
+      font-family: var(--font-mono);
+      font-size: var(--fs-eyebrow);
+      color: var(--text-3);
+      flex-wrap: wrap;
+    }
+    .hero__gh-link {
+      font-family: var(--font-mono);
+      font-size: var(--fs-mono-sm);
+      color: var(--acid-text);
+      transition: opacity var(--dur-fast);
+    }
+    .hero__gh-link:hover { opacity: 0.8; text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Nix on stage: glow behind, soft ground shadow beneath, so the
+       mascot stands next to the install block instead of floating in space. */
+    .nix-hero { display: flex; align-items: end; justify-content: center; min-width: 0; }
+    .nix-stage { position: relative; isolation: isolate; display: grid; justify-items: center; width: 100%; max-width: 380px; }
+    .nix-stage::before {
+      content: ''; position: absolute; z-index: 0;
+      inset: 14% 0 2%;
+      background:
+        radial-gradient(farthest-side at 45% 62%, var(--glow-acid), transparent 70%),
+        radial-gradient(farthest-side at 60% 30%, var(--glow-accent), transparent 68%);
+      filter: blur(6px);
+      pointer-events: none;
+    }
+    .nix-stage picture, .nix-stage img { position: relative; z-index: 1; }
+    .nix-hero img { width: 100%; max-width: 360px; filter: var(--shadow-mascot); }
+    .nix-ground {
+      position: relative; z-index: 0;
+      width: 78%;
+      /* the renders carry ~6.5% transparent padding below the feet;
+         pull the ground up so Nix stands on it (percent of stage width) */
+      margin-top: -8%;
+      display: grid; justify-items: center;
+    }
+    .install-nix .nix-ground { margin-top: -6.5%; }
+    .nix-ground::before {
+      content: ''; width: 100%; height: 14px; border-radius: 50%;
+      background: radial-gradient(ellipse, var(--ground-shadow) 0%, transparent 70%);
+      filter: blur(3px);
+    }
+
+    /* ============================================================
+       SECTION RHYTHM
+       One system, applied everywhere: every section after the hero
+       opens with a 1px rule; bands alternate open (page bg + aurora)
+       and contained (bg-1). Headers share one block: eyebrow / h2 / lead.
+    ============================================================ */
+    .section { padding-block: var(--section-pad); border-top: 1px solid var(--line); }
+    .section--alt { background: var(--bg-1); }
+
+    .section__head { max-width: 68ch; margin-bottom: var(--space-7); }
+    .section__head--tight { margin-bottom: var(--space-5); }
+    .section__eyebrow {
+      font-family: var(--font-mono);
+      font-size: var(--fs-eyebrow); letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--accent-text);
+      margin-bottom: var(--space-3);
+      display: flex; align-items: center; gap: 0.6rem;
+    }
+    .section__eyebrow::before { content: ''; width: 1.25rem; height: 2px; background: var(--accent); flex-shrink: 0; }
+    .section__h2 {
+      font-family: var(--font-ui);
+      font-size: var(--fs-h2);
+      font-weight: 700;
+      line-height: var(--lh-tight);
+      color: var(--text-1);
+      margin-bottom: var(--space-4);
+      text-wrap: balance;
+    }
+    .section__lead {
+      font-family: var(--font-ui);
+      font-size: var(--fs-body);
+      color: var(--text-2);
+      line-height: var(--lh-body);
+      max-width: 64ch;
+    }
+
+    /* ============================================================
+       DEMO TERMINAL
+    ============================================================ */
+    .demo__frame { max-width: 820px; }
+    .terminal {
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      box-shadow: var(--shadow-pop), -6px 0 24px var(--tint-pink), 6px 0 24px var(--tint-acid);
+      background: var(--term-bg);
+    }
+    .terminal__bar {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 0.7rem 1rem;
+      background: var(--term-bar);
+      border-bottom: 1px solid var(--term-line);
+    }
+    .terminal__dot { width: 12px; height: 12px; border-radius: 50%; }
+    .terminal__dot--red   { background: var(--term-dot-red); }
+    .terminal__dot--amber { background: var(--term-dot-amber); }
+    .terminal__dot--green { background: var(--term-dot-green); }
+    .terminal__label { font-family: var(--font-mono); font-size: 0.72rem; color: var(--term-meta); margin-left: var(--space-1); }
+    .terminal__body {
+      padding: var(--space-5) var(--space-5) var(--space-6);
+      font-family: var(--font-mono);
+      font-size: clamp(0.72rem, 1.4vw, 0.825rem);
+      line-height: 1.85;
+      color: var(--term-fg);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    /* Divider dashes are the only thing that can blow out the terminal width
+       on narrow viewports — clip them to the line instead of wrapping or scrolling */
+    .t-divider { display: inline-block; max-width: 100%; overflow: hidden; white-space: nowrap; vertical-align: bottom; color: var(--term-meta); opacity: 0.4; }
+    .t-prompt { color: var(--term-acid); }
+    .t-cmd    { color: var(--term-fg); }
+    .t-meta   { color: var(--term-meta); }
+    .t-high   { color: var(--term-pink); font-weight: 500; }
+    .t-med    { color: var(--term-accent); }
+    .t-low    { color: var(--term-low); }
+    .t-label  { color: var(--term-fg); }
+    .t-dim    { color: var(--term-dim); }
+    .t-blank  { display: block; height: 0.5rem; }
+
+    .detect-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-6); }
+    .detect-pill {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-2);
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 0.35rem 0.8rem;
+    }
+
+    /* ============================================================
+       THE PATTERN — header with Nix + incidents carousel
+    ============================================================ */
+    .incidents-header {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: var(--space-7);
+    }
+    .incidents-header__text { flex: 1; min-width: 0; }
+    .incidents-header__text .section__head { margin-bottom: 0; }
+    .incidents-nix { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
+    .nix-stories-img { display: block; width: 240px; height: auto; filter: var(--shadow-mascot); }
+
+    /* Speech bubble. Drawn with the same two-layer background as .card--glow:
+       the surface is painted in the padding box, the gradient in the border
+       box, so nothing sits above the text and no z-index tricks are needed. */
+    .nix-bubble-wrap { position: relative; display: inline-block; }
+    .nix-bubble {
+      position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%);
+      width: 190px;
+      padding: 0.65rem 0.9rem;
+      border: 1.5px solid transparent;
+      border-radius: var(--radius);
+      background:
+        linear-gradient(var(--bg-2), var(--bg-2)) padding-box,
+        linear-gradient(90deg, var(--accent), var(--pink), var(--acid), var(--accent)) border-box;
+      background-size: 100% 100%, 300% 100%;
+      font-family: var(--font-mono); font-size: 0.75rem;
+      color: var(--text-1); line-height: 1.4; letter-spacing: 0.02em;
+      box-shadow: var(--shadow-pop);
+      transition: opacity var(--dur-base) ease;
+      z-index: 2;
+    }
+    .nix-bubble::after {
+      content: ''; position: absolute; top: 100%; left: 50%;
+      transform: translateX(-50%);
+      border: 7px solid transparent; border-top: 8px solid var(--accent);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .nix-bubble { animation: border-shift 4s linear infinite; }
+    }
+    .nix-ground-line {
+      width: 240px; height: 2px; border-radius: 1px;
+      background: linear-gradient(90deg, transparent 0%, var(--accent) 30%, var(--acid) 70%, transparent 100%);
+      box-shadow: 0 0 10px 1px var(--glow-accent), 0 0 18px 2px var(--glow-acid);
+    }
+
+    .carousel-wrapper { position: relative; overflow: hidden; margin-top: var(--space-6); padding: 4px; }
+    .carousel-track {
+      display: flex; gap: var(--space-5);
+      transition: transform var(--dur-slow) var(--ease-out);
+      will-change: transform;
+    }
+    .carousel-slide { flex-shrink: 0; height: auto; } /* width set by JS */
+    .incident-card .card-inner {
+      padding: var(--space-5);
+      display: flex; flex-direction: column;
+      min-height: 260px;
+    }
+    .incident__title {
+      font-family: var(--font-mono);
+      font-size: var(--fs-mono); font-weight: 600;
+      color: var(--text-1);
+      margin-bottom: 0.15rem;
+      letter-spacing: 0.02em;
+    }
+    .incident__date {
+      font-family: var(--font-mono);
+      font-size: 0.66rem; color: var(--text-3);
+      margin-bottom: var(--space-3);
+      letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .incident__body {
+      font-family: var(--font-ui);
+      font-size: var(--fs-body-sm);
+      color: var(--text-2);
+      line-height: 1.65;
+      flex: 1;
+    }
+    .tag-pill {
+      display: inline-block;
+      align-self: flex-start;
+      font-family: var(--font-mono);
+      font-size: 0.62rem; letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--acid-text);
+      border: 1px solid var(--acid-text);
+      border-radius: var(--radius-pill);
+      padding: 0.2rem 0.65rem;
+      margin-top: var(--space-4);
+      background: var(--tint-acid);
+    }
+    .carousel-nav { display: flex; align-items: center; justify-content: center; gap: var(--space-4); margin-top: var(--space-5); }
+    .carousel-btn {
+      background: var(--bg-2); border: 1px solid var(--line);
+      color: var(--text-2); font-family: var(--font-mono);
+      font-size: 1rem; width: 44px; height: 44px; border-radius: 50%;
+      transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .carousel-btn:hover { border-color: var(--acid-text); color: var(--acid-text); }
+    .carousel-dots { display: flex; gap: 8px; align-items: center; }
+    .carousel-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--line-strong); padding: 0;
+      transition: background var(--dur-fast), transform var(--dur-fast);
+    }
+    .carousel-dot.active { background: var(--acid); transform: scale(1.35); }
+    .carousel-dot:focus-visible { outline-offset: 4px; }
+
+    .callout-bar {
+      display: flex; align-items: center; gap: var(--space-4);
+      margin-top: var(--space-6);
+      padding: var(--space-4) var(--space-5);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--acid);
+      background: var(--bg-2);
+      border-radius: var(--radius);
+    }
+    .callout-bar p { font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--text-2); line-height: 1.6; }
+    .callout-bar strong { color: var(--acid-text); }
+
+    /* ============================================================
+       HOW IT WORKS
+    ============================================================ */
+    .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--grid-gap); }
+    .step {
+      padding-top: var(--space-4);
+      border-top: 2px solid var(--line-strong);
+      position: relative;
+    }
+    .step::before {
+      content: ''; position: absolute; top: -2px; left: 0; width: 3rem; height: 2px;
+      background: linear-gradient(90deg, var(--acid), var(--accent));
+    }
+    .step__num { font-family: var(--font-display); font-size: 1.1rem; color: var(--accent-text); margin-bottom: var(--space-3); display: block; }
+    .step__title { font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 600; color: var(--text-1); margin-bottom: var(--space-2); }
+    .step__body { font-family: var(--font-ui); font-size: var(--fs-body-sm); color: var(--text-2); line-height: 1.65; }
+
+    /* ============================================================
+       FEATURES
+    ============================================================ */
+    .features-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--grid-gap); }
+    .feature-card .card-inner { padding: var(--space-5); display: flex; flex-direction: column; }
+    .feature-icon {
+      font-family: var(--font-mono); font-size: 1.1rem; font-weight: 600;
+      width: 2.25rem; height: 2.25rem; border-radius: var(--radius-sm);
+      display: grid; place-items: center;
+      color: var(--acid-text); background: var(--tint-acid); border: 1px solid var(--acid-text);
+      margin-bottom: var(--space-4);
+    }
+    .feature-title { font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 600; color: var(--text-1); margin-bottom: var(--space-2); }
+    .feature-body { font-family: var(--font-ui); font-size: var(--fs-body-sm); color: var(--text-2); line-height: 1.65; flex: 1; }
+    .feature-body a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
+    .soon-pill {
+      display: inline-block; align-self: flex-start; margin-top: var(--space-4);
+      font-family: var(--font-mono); font-size: 0.65rem;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      background: var(--tint-accent); color: var(--accent-text);
+      border: 1px solid var(--accent-text); border-radius: var(--radius-sm);
+      padding: 0.15em 0.55em;
+    }
+
+    /* ============================================================
+       SOURCES / TRUST
+    ============================================================ */
+    .sources-trust { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+
+    .sources__table { width: 100%; border-collapse: collapse; }
+    .sources__table th {
+      font-family: var(--font-mono); font-size: var(--fs-eyebrow); letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--text-3); text-align: left; padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--line-strong);
+    }
+    .sources__table td {
+      font-family: var(--font-ui); font-size: var(--fs-body-sm);
+      color: var(--text-2); padding: 0.7rem 0.75rem;
+      border-bottom: 1px solid var(--line-soft);
+      word-break: break-word;
+      vertical-align: top;
+    }
+    .sources__table td:first-child { color: var(--text-1); font-weight: 600; }
+    .status--supported, .status--planned {
+      display: inline-block;
+      font-family: var(--font-mono); font-size: 0.7rem; white-space: nowrap;
+      border-radius: var(--radius-pill); padding: 0.15rem 0.6rem;
+    }
+    .status--supported { color: var(--acid-text); background: var(--tint-acid); border: 1px solid var(--acid-text); }
+    .status--planned { color: var(--text-3); background: var(--tint-muted); border: 1px solid var(--line); }
+
+    .trust-item {
+      display: flex; align-items: baseline; gap: 0.6rem;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--line-soft);
+      font-family: var(--font-ui); font-size: var(--fs-body-sm); color: var(--text-2);
+      line-height: 1.5;
+    }
+    .trust-item:last-child { border-bottom: none; }
+    .trust-check { font-family: var(--font-mono); font-size: 0.82rem; color: var(--acid-text); flex-shrink: 0; }
+
+    /* ============================================================
+       INSTALL (large) — Nix stands to the left of the install block,
+       un-mirrored, waving toward it.
+    ============================================================ */
+    .install-with-nix {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: clamp(1.5rem, 4vw, 3.5rem);
+      align-items: center;
+    }
+    .install-content { min-width: 0; }
+    .install-content .section__head { margin-bottom: var(--space-5); }
+    .install-large .install-code { padding: 1rem 1.25rem; font-size: var(--fs-mono); }
+    .install-large .copy-btn { font-size: 0.72rem; padding: 0 1.1rem; }
+    .install-nix { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+    .install-nix .nix-stage { max-width: 290px; }
+    .install-nix img { width: 100%; max-width: 280px; filter: var(--shadow-mascot); }
+    .install-nix__tagline { font-family: var(--font-ui); font-size: 1rem; line-height: 1.5; color: var(--text-2); text-align: center; }
+
+    .cosign-details { margin-top: var(--space-5); }
+    .cosign-details summary {
+      font-family: var(--font-mono); font-size: var(--fs-mono-sm);
+      color: var(--text-3);
+      padding: 0.6rem 0;
+      display: flex; align-items: center; gap: 0.5rem;
+      transition: color var(--dur-fast);
+    }
+    .cosign-details summary:hover { color: var(--accent-text); }
+    .cosign-details summary::before { content: '▶'; font-size: 0.6rem; transition: transform var(--dur-base); }
+    .cosign-details[open] summary::before { transform: rotate(90deg); }
+    .cosign-details__body {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--space-4) var(--space-5);
+      margin-top: var(--space-2);
+      overflow-x: auto;
+    }
+    .cosign-details__body code {
+      display: block; font-family: var(--font-mono); font-size: var(--fs-mono-sm);
+      color: var(--acid-text); line-height: 1.75;
+      white-space: pre-wrap; word-break: break-all;
+    }
+
+    /* ============================================================
+       COMPLIANCE
+    ============================================================ */
+    .compliance-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--grid-gap); }
+    .compliance-card .card-inner { padding: var(--space-5); }
+    .compliance__standard { font-family: var(--font-mono); font-size: var(--fs-mono-sm); font-weight: 600; color: var(--accent-text); margin-bottom: var(--space-2); letter-spacing: 0.04em; }
+    .compliance__title { font-family: var(--font-ui); font-size: 1.05rem; font-weight: 700; color: var(--text-1); margin-bottom: var(--space-2); line-height: 1.35; }
+    .compliance__body { font-family: var(--font-ui); font-size: var(--fs-body-sm); color: var(--text-2); line-height: 1.65; }
+
+    /* ============================================================
+       FAQ
+    ============================================================ */
+    .faq { max-width: 760px; border-top: 1px solid var(--line-strong); }
+    .faq-item { border-bottom: 1px solid var(--line); }
+    .faq-item summary {
+      font-family: var(--font-mono); font-size: var(--fs-mono);
+      color: var(--text-1); padding: 1.1rem 0.25rem;
+      display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+      transition: color var(--dur-fast);
+    }
+    .faq-item summary:hover { color: var(--accent-text); }
+    .faq-arrow { font-size: 0.7rem; color: var(--accent-text); flex-shrink: 0; transition: transform var(--dur-base); }
+    details[open] .faq-arrow { transform: rotate(90deg); }
+    .faq-item__body {
+      font-family: var(--font-ui); font-size: var(--fs-body-sm);
+      color: var(--text-2); line-height: 1.7;
+      padding: 0 0.25rem 1.2rem;
+      max-width: 64ch;
+    }
+
+    /* ============================================================
+       FOOTER
+    ============================================================ */
+    .footer { background: var(--bg-1); border-top: 1px solid var(--line-strong); padding-block: var(--space-7) var(--space-6); }
+    .footer__grid { display: grid; grid-template-columns: 1.4fr 1fr 1.2fr; gap: var(--space-6); }
+    .footer__wordmark { font-family: var(--font-mono); font-size: 1rem; font-weight: 600; color: var(--text-1); margin-bottom: var(--space-2); }
+    .footer__tagline { font-family: var(--font-ui); font-size: var(--fs-body-sm); color: var(--text-3); line-height: 1.6; }
+    .footer__tagline a { color: var(--accent-text); }
+    .footer__heading { font-family: var(--font-mono); font-size: var(--fs-eyebrow); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: var(--space-3); }
+    .footer__links { display: flex; flex-direction: column; gap: 0.45rem; }
+    .footer__link { font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--text-2); transition: color var(--dur-fast); }
+    .footer__link:hover { color: var(--acid-text); }
+    .footer__legal {
+      margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--line);
+      font-family: var(--font-mono); font-size: 0.68rem;
+      color: var(--text-3); line-height: 1.7;
+    }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+
+    /* ── Tablet (≤ 960px) ── */
+    @media (max-width: 960px) {
+      .hero__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 0.6fr); gap: clamp(1rem, 3vw, 2rem); }
+      .hero__h1 { font-size: clamp(1.05rem, 2.75vw, 1.6rem); }
+      .nix-stage { max-width: 260px; }
+      .nix-hero img { max-width: 250px; }
+      .steps { grid-template-columns: 1fr; gap: var(--space-5); }
+      .features-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .sources-trust { grid-template-columns: 1fr; gap: var(--space-7); }
+      .compliance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .footer__grid { grid-template-columns: 1fr; gap: var(--space-5); }
+      .incidents-header { gap: var(--space-5); }
+      .nix-stories-img, .nix-ground-line { width: 170px; }
+      /* Install: Nix sits beside the heading on the left; the install block spans full width below. */
+      .install-with-nix {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+          "nix head"
+          "install install"
+          "cosign  cosign";
+        column-gap: var(--space-5); row-gap: 0;
+        align-items: center;
+      }
+      .install-content { display: contents; }
+      .install-content > .section__head { grid-area: head; margin-bottom: 0; }
+      .install-content > .install-block { grid-area: install; margin-top: var(--space-5); }
+      .install-content > .cosign-details { grid-area: cosign; }
+      .install-nix { grid-area: nix; }
+      .install-nix .nix-stage { max-width: 180px; }
+      .install-nix img { max-width: 170px; }
+    }
+
+    /* ── Hero on narrow screens (≤ 700px): Nix moves beside the headline ── */
+    @media (max-width: 700px) {
+      /* Hero: Nix sits beside the eyebrow + headline only; sub, pills and install block
+         take the full width below. .hero__left becomes display:contents so its children
+         can be placed on the grid directly. */
+      .hero__grid {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "eyebrow eyebrow"
+          "h1      nix"
+          "sub     sub"
+          "pills   pills"
+          "install install";
+        column-gap: var(--space-4); row-gap: 0;
+        align-items: center;
+      }
+      .hero__left { display: contents; }
+      .hero__eyebrow { grid-area: eyebrow; }
+      .hero__h1 { grid-area: h1; font-size: clamp(0.95rem, 4.5vw, 1.2rem); }
+      .hero__h1 br { display: none; } /* let the headline wrap naturally in the narrow column */
+      .hero__sub { grid-area: sub; font-size: var(--fs-body-sm); margin-bottom: var(--space-4); }
+      .trust-strip { grid-area: pills; margin-bottom: var(--space-5); gap: 0.35rem; }
+      .hero__left > .install-block { grid-area: install; }
+      .nix-hero { grid-area: nix; align-items: center; }
+      .nix-hero .nix-stage { width: clamp(96px, 28vw, 140px); max-width: none; }
+      .nix-hero img { width: 100%; max-width: none; }
+      .nix-hero .nix-ground { display: none; } /* too small to read at this size */
+      .nix-hero .nix-stage::before { inset: 8% 0 0; }
+    }
+
+    /* ── Phones (≤ 600px) ── */
+    @media (max-width: 600px) {
+      .nav__links { display: none; }
+      .theme-switch__label { display: none; }
+      .theme-switch__btn { padding: 0.4rem 0.6rem; min-width: 36px; justify-content: center; }
+      .features-grid, .compliance-grid { grid-template-columns: 1fr; }
+
+      /* Stories: Nix sits beside the heading (his height ≈ a 3-line h2); the lead spans full width below */
+      .incidents-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "eyebrow eyebrow"
+          "h2      nix"
+          "lead    lead";
+        column-gap: var(--space-4); row-gap: 0;
+        align-items: center;
+      }
+      .incidents-header__text, .incidents-header__text > .section__head { display: contents; }
+      .incidents-header__text .section__eyebrow { grid-area: eyebrow; }
+      .incidents-header__text .section__h2 { grid-area: h2; margin-bottom: var(--space-4); }
+      .incidents-header__text > .section__lead { grid-area: lead; margin-top: var(--space-2); }
+      .incidents-nix { grid-area: nix; margin-bottom: var(--space-4); }
+      .nix-stories-img, .nix-ground-line { width: 112px; }
+      .nix-bubble { width: 140px; font-size: 0.66rem; padding: 0.5rem 0.65rem; left: auto; right: 0; transform: none; }
+
+      /* Install: smaller Nix in a fixed-width column, tagline wraps beneath him */
+      .install-with-nix { column-gap: var(--space-4); }
+      .install-nix { width: 150px; }
+      .install-nix .nix-stage { max-width: 140px; }
+      .install-nix img { max-width: 130px; }
+      .install-nix__tagline { font-size: 0.75rem; line-height: 1.4; }
+      .terminal__body { padding: var(--space-4); }
+      .section__h2 { font-size: clamp(1.35rem, 5.5vw, 1.8rem); }
+      .incident-card .card-inner { min-height: 0; }
+    }
+
+    /* ── Very small phones (≤ 420px) — keep the headline to ~12 chars/line beside Nix ── */
+    @media (max-width: 420px) {
+      .hero__h1 { font-size: clamp(0.85rem, 4.4vw, 1.1rem); }
+    }
+    @media (max-width: 380px) {
+      .nav__logo { font-size: 1.05rem; }
+      .btn--sm { font-size: 0.72rem; padding: 0.4rem 0.7rem; }
+      .nav__right { gap: var(--space-2); }
+    }
+  </style>
+</head>
+<body>
+
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<!-- Aurora -->
+<div class="aurora" aria-hidden="true">
+  <div class="aurora-orb aurora-orb--purple"></div>
+  <div class="aurora-orb aurora-orb--pink"></div>
+  <div class="aurora-orb aurora-orb--green"></div>
+</div>
+
+<!-- ============================================================
+     NAV
+============================================================ -->
+<header role="banner">
+  <nav class="nav" aria-label="Main navigation">
+    <div class="container container--wide">
+      <div class="nav__inner">
+        <a href="#" class="nav__logo" aria-label="SanitAI home">
+          Sanit<span class="accent">AI</span>
+        </a>
+        <div class="nav__right">
+          <div class="nav__links">
+            <a href="#install" class="nav__link">Install</a>
+            <a href="#how-it-works" class="nav__link">How it works</a>
+            <a href="https://github.com/thepixelabs/sanitai" class="nav__link" target="_blank" rel="noopener noreferrer">★ GitHub</a>
+          </div>
+          <div class="theme-switch" id="theme-toggle" role="group" aria-label="Color theme">
+            <button type="button" class="theme-switch__btn" data-theme-set="light" aria-pressed="false" aria-label="Light theme">
+              <span class="theme-switch__glyph" aria-hidden="true">☀</span><span class="theme-switch__label">Light</span>
+            </button>
+            <button type="button" class="theme-switch__btn" data-theme-set="dark" aria-pressed="true" aria-label="Dark theme">
+              <span class="theme-switch__glyph" aria-hidden="true">☾</span><span class="theme-switch__label">Dark</span>
+            </button>
+          </div>
+          <a href="#install" class="btn btn--sm">Install →</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<main id="main-content">
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<section class="hero" aria-labelledby="hero-heading">
+  <div class="container container--wide">
+    <div class="hero__grid">
+      <!-- Left: copy + install -->
+      <div class="hero__left">
+        <p class="hero__eyebrow">v0.1.0 · MIT · Offline by design</p>
+        <h1 class="hero__h1 glitch-text" id="hero-heading">
+          Your AI chat history <br />is a credential store.
+        </h1>
+        <p class="hero__sub">
+          SanitAI scans your local LLM conversation history for leaked API keys, database credentials, and PII. Entirely on your machine. Zero network calls. No account.
+        </p>
+        <div class="trust-strip" role="list" aria-label="Key features">
+          <span class="trust-pill" role="listitem">100% offline</span>
+          <span class="trust-pill" role="listitem">no telemetry</span>
+          <span class="trust-pill" role="listitem">MIT licensed</span>
+          <span class="trust-pill" role="listitem">signed binaries</span>
+        </div>
+
+        <div class="install-block card card--glow" role="region" aria-label="Installation commands">
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># Homebrew</span><br />
+              <span class="cmd">brew install thepixelabs/tap/sanitai</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy Homebrew install command" data-copy="brew install thepixelabs/tap/sanitai">copy</button>
+          </div>
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># curl</span><br />
+              <span class="cmd">curl -fsSL https://releases.sanitai.dev/install.sh | sh</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy curl install command" data-copy="curl -fsSL https://releases.sanitai.dev/install.sh | sh">copy</button>
+          </div>
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># cargo</span><br />
+              <span class="cmd">cargo install sanitai</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy cargo install command" data-copy="cargo install sanitai">copy</button>
+          </div>
+          <div class="install-block__foot">
+            <span>macOS · Linux · signed with cosign</span>
+            <a href="https://github.com/thepixelabs/sanitai" class="hero__gh-link" target="_blank" rel="noopener noreferrer">View on GitHub →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Nix, facing the headline -->
+      <div class="nix-hero">
+        <div class="nix-stage">
+          <picture>
+            <source srcset="nix-hero.avif" type="image/avif" />
+            <source srcset="nix-hero.webp" type="image/webp" />
+            <img
+              src="nix-hero.png"
+              alt="Nix the Raccoon — SanitAI's built-in scanner, actively finding secrets in your local conversation history"
+              width="400"
+              height="497"
+              loading="eager"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </picture>
+          <div class="nix-ground" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SEE IT RUN
+============================================================ -->
+<section class="section section--alt" aria-labelledby="demo-heading">
+  <div class="container">
+    <div class="section__head">
+      <p class="section__eyebrow">See it run</p>
+      <h2 class="section__h2" id="demo-heading">One command. Every secret. Nothing sent.</h2>
+      <p class="section__lead">Meet Nix — SanitAI's built-in scanner. Auto-discovers your local Claude Code, Claude Desktop, and Cursor session files, flags every finding, touches no network.</p>
+    </div>
+
+    <div class="demo__frame">
+      <div class="terminal" role="region" aria-label="SanitAI terminal demo output">
+        <div class="terminal__bar" aria-hidden="true">
+          <div class="terminal__dot terminal__dot--red"></div>
+          <div class="terminal__dot terminal__dot--amber"></div>
+          <div class="terminal__dot terminal__dot--green"></div>
+          <span class="terminal__label">bash</span>
+        </div>
+        <div class="terminal__body">
+          <span class="t-prompt">$ </span><span class="t-cmd">sanitai scan</span><br />
+          <span class="t-blank"></span>
+          <span class="t-meta">SanitAI v0.1.0 — local scan, no network</span><br />
+          <span class="t-meta">Auto-discovered: 3 files  ·  1,842 turns  ·  ~/.claude/projects/</span><br />
+          <span class="t-blank"></span>
+          <span class="t-label">FINDINGS (4)</span><br />
+          <span class="t-divider">─────────────────────────────────────────────────────────────</span><br />
+          <span class="t-high">[HIGH  ]</span><span class="t-dim"> ~/.claude/projects/myproject/session.jsonl  turn=47  aws_access_key_id  bytes=312..332</span><br />
+          <span class="t-blank"></span>
+          <span class="t-high">[HIGH  ]</span><span class="t-dim"> ~/.claude/projects/apiwork/chat.jsonl  turn=12  generic_api_key  bytes=88..110</span><br />
+          <span class="t-blank"></span>
+          <span class="t-med">[MEDIUM]</span><span class="t-dim"> ~/.claude/projects/work/session.jsonl  turn=91  email_address  bytes=201..220</span><br />
+          <span class="t-blank"></span>
+          <span class="t-low">[LOW   ]</span><span class="t-dim"> ~/.claude/projects/infra/debug.jsonl  turn=3  internal_hostname  bytes=44..60</span><br />
+          <span class="t-divider">─────────────────────────────────────────────────────────────</span><br />
+          <span class="t-meta">4 findings  ·  1,842 turns  ·  0.8s  ·  zero network calls</span><br />
+          <span class="t-blank"></span>
+          <span class="t-meta">Run `sanitai redact` to write a clean copy.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detect-grid" role="list" aria-label="Supported detection categories">
+      <span class="detect-pill" role="listitem">AWS</span>
+      <span class="detect-pill" role="listitem">GCP</span>
+      <span class="detect-pill" role="listitem">Azure</span>
+      <span class="detect-pill" role="listitem">Stripe</span>
+      <span class="detect-pill" role="listitem">Twilio</span>
+      <span class="detect-pill" role="listitem">Anthropic</span>
+      <span class="detect-pill" role="listitem">OpenAI</span>
+      <span class="detect-pill" role="listitem">GitHub</span>
+      <span class="detect-pill" role="listitem">Database URLs</span>
+      <span class="detect-pill" role="listitem">PEM private keys</span>
+      <span class="detect-pill" role="listitem">Bearer tokens</span>
+      <span class="detect-pill" role="listitem">Email addresses</span>
+      <span class="detect-pill" role="listitem">Phone numbers</span>
+      <span class="detect-pill" role="listitem">Custom YAML rules</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     THE PATTERN — incidents carousel
+============================================================ -->
+<section class="section" aria-labelledby="incidents-heading">
+  <div class="container">
+    <div class="incidents-header">
+      <div class="incidents-header__text">
+        <div class="section__head section__head--tight">
+          <p class="section__eyebrow">The pattern</p>
+          <h2 class="section__h2" id="incidents-heading">Files no one thought of as credentials.</h2>
+        </div>
+        <p class="section__lead">LLM chat exports are JSON files. They happen to contain everything you typed into the AI assistant: API keys, database strings, internal hostnames, authentication tokens, proprietary code. You do not think of them as credential stores when you create them. Attackers do not need you to.</p>
+      </div>
+      <div class="incidents-nix">
+        <div class="nix-bubble-wrap">
+          <div class="nix-bubble" id="nix-quip">Found 3. Again.</div>
+          <picture>
+            <source srcset="nix-stories.avif" type="image/avif" />
+            <source srcset="nix-stories.webp" type="image/webp" />
+            <img
+              src="nix-stories.png"
+              alt="Nix the Raccoon mascot — SanitAI secret scanner, dry look after finding leaked credentials in an LLM export"
+              width="280"
+              height="348"
+              loading="lazy"
+              decoding="async"
+              class="nix-stories-img"
+            />
+          </picture>
+        </div>
+        <div class="nix-ground-line" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="carousel-wrapper" role="region" aria-label="Security incident stories" aria-roledescription="carousel">
+      <div class="carousel-track" id="incidents-track">
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">CircleCI</p>
+            <p class="incident__date">January 2023</p>
+            <p class="incident__body">Malware on a CI engineer's laptop stole browser session cookies stored as plaintext on disk. The attacker bypassed 2FA entirely and reached CircleCI's production databases — exfiltrating every customer API key, environment variable, and token in the system. Every CircleCI customer was told to assume their secrets compromised and rotate immediately. The laptop was the breach surface.</p>
+            <span class="tag-pill">endpoint compromise</span>
+          </div>
+        </div>
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">Okta Support</p>
+            <p class="incident__date">October 2023</p>
+            <p class="incident__body">Customers uploaded HAR files — browser diagnostic exports — to Okta's support system. HAR files capture every HTTP header and cookie, including live session tokens. An attacker accessed the support archive and immediately used extracted tokens to impersonate users at 1Password, Cloudflare, and BeyondTrust. 134 enterprise customers affected. The files were routine diagnostic exports. Nobody thought of them as credential stores.</p>
+            <span class="tag-pill">export file as attack vector</span>
+          </div>
+        </div>
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">Samsung / AI Chat</p>
+            <p class="incident__date">March 2023</p>
+            <p class="incident__body">Within three weeks of lifting its internal AI tool ban, three Samsung semiconductor engineers submitted proprietary source code, equipment control scripts, and a full internal meeting recording to an AI chat assistant. Samsung could not retrieve the data — it had left the corporate perimeter. The company subsequently banned all generative AI tools company-wide. No external attacker was required.</p>
+            <span class="tag-pill">AI chat as data exfiltration surface</span>
+          </div>
+        </div>
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">The LastPass Pattern</p>
+            <p class="incident__date">2022</p>
+            <p class="incident__body">Attackers compromised a DevOps engineer's personal machine through a vulnerability in Plex Media Server running on his home computer. The machine was the entire attack surface. The payload was credentials stored locally — an encrypted vault whose keys were also on the same endpoint. This is the dominant modern breach chain: not a server exploit, but a local file on an endpoint that no one thought to protect. AI chat exports are the newest member of that file category.</p>
+            <span class="tag-pill">local file, full breach</span>
+          </div>
+        </div>
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">Okta / LAPSUS$</p>
+            <p class="incident__date">2022</p>
+            <p class="incident__body">LAPSUS$ breached Sitel, Okta's support contractor, through a support engineer's workstation. On that local machine they found a spreadsheet of domain administrator credentials. Five days of dwell time on the endpoint. 366 Okta enterprise customers affected. The file that enabled it wasn't in a server or a database — it was in a Downloads folder on someone's work laptop.</p>
+            <span class="tag-pill">credentials in Downloads</span>
+          </div>
+        </div>
+
+        <div class="carousel-slide card incident-card">
+          <div class="card-inner">
+            <p class="incident__title">Toyota</p>
+            <p class="incident__date">2017 – 2022</p>
+            <p class="incident__body">A Toyota subcontractor committed source code containing a live API key to a public GitHub repository in December 2017. The key granted access to a customer data server. It remained unrotated and active for five years. Toyota cannot confirm whether the 296,019 affected customers' data was accessed — because the access logging wasn't there to tell them. Five years of silent exposure, zero alerts.</p>
+            <span class="tag-pill">5 years, zero alerts</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="carousel-nav">
+        <button type="button" class="carousel-btn" id="carousel-prev" aria-label="Previous incidents">←</button>
+        <div class="carousel-dots" id="carousel-dots"></div>
+        <button type="button" class="carousel-btn" id="carousel-next" aria-label="Next incidents">→</button>
+      </div>
+    </div>
+
+    <div class="callout-bar" role="note">
+      <p><strong>39 million secrets leaked on GitHub in 2024 alone.</strong> AI chat exports are the new unguarded surface. — GitHub Security Blog, 2025</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<section class="section section--alt" id="how-it-works" aria-labelledby="how-heading">
+  <div class="container">
+    <div class="section__head">
+      <p class="section__eyebrow">Workflow</p>
+      <h2 class="section__h2" id="how-heading">Scan in under a minute.</h2>
+    </div>
+
+    <div class="steps" role="list">
+      <div class="step" role="listitem">
+        <span class="step__num" aria-hidden="true">01</span>
+        <p class="step__title">Install</p>
+        <p class="step__body">Install via Homebrew, cargo, or the install script. SanitAI runs entirely on your machine — no account, no sign-up, no network calls at runtime.</p>
+      </div>
+      <div class="step" role="listitem">
+        <span class="step__num" aria-hidden="true">02</span>
+        <p class="step__title">Scan</p>
+        <p class="step__body"><code class="code">sanitai scan</code> auto-discovers Claude Code, Claude Desktop, and Cursor session files on your machine, runs every detector, and surfaces findings with file, turn, and severity. Nothing is modified.</p>
+      </div>
+      <div class="step" role="listitem">
+        <span class="step__num" aria-hidden="true">03</span>
+        <p class="step__title">Redact</p>
+        <p class="step__body"><code class="code">sanitai redact</code> writes a clean copy alongside the original. Rotate the credentials that surfaced. Done.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section class="section" id="features" aria-labelledby="features-heading">
+  <div class="container">
+    <div class="section__head">
+      <p class="section__eyebrow">What it does</p>
+      <h2 class="section__h2" id="features-heading">Built for the command line.</h2>
+      <p class="section__lead">Local, offline, and deliberately narrow in scope — SanitAI does one job and does it without asking for an account.</p>
+    </div>
+
+    <div class="features-grid" role="list">
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">#</div>
+          <p class="feature-title">Secret Detection</p>
+          <p class="feature-body">Scans Claude.ai and OpenAI exports for 8+ categories of leaked credentials — API keys, tokens, passwords, and PII — using pattern matching and entropy analysis. Nothing leaves your machine.</p>
+        </div>
+      </div>
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">✂</div>
+          <p class="feature-title">Redact on Export</p>
+          <p class="feature-body">Produces a clean copy of your chat export with findings masked or removed. The original file is never modified.</p>
+        </div>
+      </div>
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">⚙</div>
+          <p class="feature-title">Custom Rule Engine</p>
+          <p class="feature-body">Write your own detection rules in YAML — define patterns, keywords, entropy thresholds, and severity levels. Ship a <code class="code">.sanitai/rules.yaml</code> with your project to enforce team-wide hygiene.</p>
+        </div>
+      </div>
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">|&gt;</div>
+          <p class="feature-title">Pipe Mode</p>
+          <p class="feature-body">Reads from stdin, writes to stdout. Drop it into any CI/CD pipeline with no config required — <code class="code">cat export.json | sanitai scan</code> is a complete workflow.</p>
+        </div>
+      </div>
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">📦</div>
+          <p class="feature-title">Multi-format Support</p>
+          <p class="feature-body">Claude.ai and OpenAI Chat exports supported today. GitHub Copilot and Google Gemini exports on the roadmap. One command works the same regardless of which AI tool generated the file.</p>
+          <span class="soon-pill">More coming</span>
+        </div>
+      </div>
+
+      <div class="card feature-card" role="listitem">
+        <div class="card-inner">
+          <div class="feature-icon" aria-hidden="true">⇄</div>
+          <p class="feature-title">Altergo Integration</p>
+          <p class="feature-body">Works natively with <a href="https://altergo.dev" target="_blank" rel="noopener noreferrer">Altergo</a> — the multi-account Claude Code manager. Scan across all your workspaces in one pass. No extra configuration.</p>
+          <span class="soon-pill">Coming soon</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SUPPORTED SOURCES + TRUST SIGNALS
+============================================================ -->
+<section class="section section--alt" aria-labelledby="sources-heading">
+  <div class="container">
+    <div class="sources-trust">
+      <div>
+        <div class="section__head section__head--tight">
+          <p class="section__eyebrow">Compatibility</p>
+          <h2 class="section__h2" id="sources-heading">Supported Sources</h2>
+        </div>
+        <table class="sources__table" aria-label="Supported export sources">
+          <thead>
+            <tr>
+              <th scope="col">Source</th>
+              <th scope="col">Format</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Claude Code</td>
+              <td>JSONL session files (<code class="code">~/.claude/projects/</code>)</td>
+              <td><span class="status--supported">Supported</span></td>
+            </tr>
+            <tr>
+              <td>Claude Desktop</td>
+              <td>JSON conversation files (auto-discovered)</td>
+              <td><span class="status--supported">Supported</span></td>
+            </tr>
+            <tr>
+              <td>Cursor</td>
+              <td>SQLite workspace storage (<code class="code">.vscdb</code>)</td>
+              <td><span class="status--supported">Supported</span></td>
+            </tr>
+            <tr>
+              <td>GitHub Copilot</td>
+              <td>Chat history</td>
+              <td><span class="status--planned">Planned</span></td>
+            </tr>
+            <tr>
+              <td>Google Gemini</td>
+              <td>Conversation history</td>
+              <td><span class="status--planned">Planned</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <div class="section__head section__head--tight">
+          <p class="section__eyebrow">Verification</p>
+          <h2 class="section__h2" id="trust-heading">Trust Signals</h2>
+        </div>
+        <ul class="trust-list" aria-labelledby="trust-heading">
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>Zero network calls at runtime — verify with <code class="code">strace</code> or <code class="code">fs_usage</code></span></li>
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>Signed binaries via cosign/Sigstore</span></li>
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>MIT licensed — read every line on GitHub</span></li>
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>No telemetry — not opt-out, architecturally absent</span></li>
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>Original file never modified by default</span></li>
+          <li class="trust-item"><span class="trust-check" aria-hidden="true">✓</span> <span>seccomp-bpf sandbox blocks network syscalls on Linux</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     INSTALL (large)
+============================================================ -->
+<section class="section" id="install" aria-labelledby="install-heading">
+  <div class="container container--narrow">
+    <div class="install-with-nix">
+      <div class="install-nix">
+        <div class="nix-stage">
+          <picture>
+            <source srcset="nix-cta.avif" type="image/avif" />
+            <source srcset="nix-cta.webp" type="image/webp" />
+            <img
+              src="nix-cta.png"
+              alt="Nix the Raccoon mascot — SanitAI install complete, scan your LLM exports for leaked secrets and API keys"
+              width="280"
+              height="280"
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
+          <div class="nix-ground" aria-hidden="true"></div>
+        </div>
+        <p class="install-nix__tagline">Scan before you share.<br>Sleep after you do.</p>
+      </div>
+
+      <div class="install-content">
+        <div class="section__head section__head--tight">
+          <p class="section__eyebrow">Get started</p>
+          <h2 class="section__h2" id="install-heading">Install SanitAI</h2>
+        </div>
+
+        <div class="install-block install-large card card--glow" role="region" aria-label="Installation commands">
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># Homebrew</span><br />
+              <span class="cmd">brew install thepixelabs/tap/sanitai</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy Homebrew install command" data-copy="brew install thepixelabs/tap/sanitai">copy</button>
+          </div>
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># curl</span><br />
+              <span class="cmd">curl -fsSL https://releases.sanitai.dev/install.sh | sh</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy curl install command" data-copy="curl -fsSL https://releases.sanitai.dev/install.sh | sh">copy</button>
+          </div>
+          <div class="install-row">
+            <div class="install-code">
+              <span class="comment"># cargo</span><br />
+              <span class="cmd">cargo install sanitai</span>
+            </div>
+            <button type="button" class="copy-btn" aria-label="Copy cargo install command" data-copy="cargo install sanitai">copy</button>
+          </div>
+        </div>
+
+        <details class="cosign-details">
+          <summary>Verify binary signature with cosign</summary>
+          <div class="cosign-details__body">
+            <code>cosign verify-blob \
+  --certificate-identity https://github.com/thepixelabs/sanitai/.github/workflows/release.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --bundle sanitai.bundle \
+  sanitai</code>
+          </div>
+        </details>
+      </div><!-- /.install-content -->
+    </div><!-- /.install-with-nix -->
+  </div>
+</section>
+
+<!-- ============================================================
+     COMPLIANCE
+============================================================ -->
+<section class="section section--alt" id="compliance" aria-labelledby="compliance-heading">
+  <div class="container">
+    <div class="section__head">
+      <p class="section__eyebrow">For the audit file</p>
+      <h2 class="section__h2" id="compliance-heading">Compliance Notes</h2>
+    </div>
+
+    <div class="compliance-grid">
+      <div class="card compliance-card">
+        <div class="card-inner">
+          <p class="compliance__standard">GDPR Art. 32</p>
+          <p class="compliance__title">Local processing — no Art. 28 agreement needed</p>
+          <p class="compliance__body">SanitAI processes data exclusively on the local filesystem. No personal data crosses a network boundary. No data processor agreement under GDPR Art. 28 is required because no sub-processor is involved.</p>
+        </div>
+      </div>
+      <div class="card compliance-card">
+        <div class="card-inner">
+          <p class="compliance__standard">SOC 2 CC6.1 / CC6.6</p>
+          <p class="compliance__title">Auditable scan output as detective control evidence</p>
+          <p class="compliance__body">Scan reports can be retained as evidence of detective controls for logical access restrictions. JSON output format integrates with SIEM and GRC platforms for automated evidence collection.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FAQ
+============================================================ -->
+<section class="section" aria-labelledby="faq-heading">
+  <div class="container">
+    <div class="section__head">
+      <p class="section__eyebrow">Questions</p>
+      <h2 class="section__h2" id="faq-heading">The questions you'd ask Nix.</h2>
+    </div>
+
+    <div class="faq">
+
+      <details class="faq-item">
+        <summary>
+          Does SanitAI send my conversations to any server?
+          <span class="faq-arrow" aria-hidden="true">▶</span>
+        </summary>
+        <p class="faq-item__body">No. SanitAI runs entirely on your local machine. Your conversation exports never leave your filesystem. There is no telemetry, no analytics, no network calls of any kind at runtime. Verify with <code class="code">strace</code> on Linux or <code class="code">fs_usage</code> on macOS.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>
+          What types of secrets can SanitAI detect?
+          <span class="faq-arrow" aria-hidden="true">▶</span>
+        </summary>
+        <p class="faq-item__body">SanitAI detects API keys for AWS, GCP, Azure, Stripe, Twilio, OpenAI, Anthropic, and GitHub; database connection strings (PostgreSQL, MySQL, MongoDB); PEM private keys and SSH keys; bearer tokens; and PII including email addresses and phone numbers. Custom YAML rules let you extend detection for your own patterns.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>
+          Which LLM conversation sources are supported?
+          <span class="faq-arrow" aria-hidden="true">▶</span>
+        </summary>
+        <p class="faq-item__body">SanitAI auto-discovers Claude Code session files (<code class="code">~/.claude/projects/**/*.jsonl</code>), Claude Desktop conversation JSON files, and Cursor workspace SQLite databases. You can also pass any file or directory explicitly (<code class="code">sanitai scan &lt;path&gt;</code>), or pipe content in via stdin. No export or download step required. GitHub Copilot and Google Gemini support are planned.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>
+          Can I run SanitAI in a CI/CD pipeline?
+          <span class="faq-arrow" aria-hidden="true">▶</span>
+        </summary>
+        <p class="faq-item__body">Yes. SanitAI exits with code 1 when findings are present, making it compatible with any CI/CD system. Use <code class="code">--format json</code> for machine-readable output and <code class="code">--exit-zero</code> for non-blocking canary scans.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>
+          How do I suppress false positives?
+          <span class="faq-arrow" aria-hidden="true">▶</span>
+        </summary>
+        <p class="faq-item__body">Disable specific detectors in <code class="code">~/.config/sanitai/config.toml</code> using <code class="code">disable_detectors = ['email_address']</code>. Custom rules support <code class="code">context_keywords</code> to narrow pattern matching and reduce false positives for your environment.</p>
+      </details>
+
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer class="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer__grid">
+      <div>
+        <p class="footer__wordmark">Sanit<span class="accent">AI</span></p>
+        <p class="footer__tagline">Scan before you share.<br />Sleep after you do.</p>
+      </div>
+      <div>
+        <p class="footer__heading">Links</p>
+        <nav class="footer__links" aria-label="Footer navigation">
+          <a href="https://github.com/thepixelabs/sanitai" class="footer__link" target="_blank" rel="noopener noreferrer">SanitAI on GitHub</a>
+          <a href="https://github.com/thepixelabs/sanitai/tree/main/docs" class="footer__link" target="_blank" rel="noopener noreferrer">Docs</a>
+          <a href="#compliance" class="footer__link">Compliance</a>
+          <a href="https://github.com/thepixelabs/sanitai/security" class="footer__link" target="_blank" rel="noopener noreferrer">Security</a>
+          <a href="https://github.com/thepixelabs/sanitai/releases" class="footer__link" target="_blank" rel="noopener noreferrer">Changelog</a>
+        </nav>
+      </div>
+      <div>
+        <p class="footer__heading">A Pixelabs product</p>
+        <p class="footer__tagline">
+          Built by <a href="https://github.com/thepixelabs" target="_blank" rel="noopener noreferrer">Pixelabs</a>.<br />
+          Questions? Open an issue on GitHub.
+        </p>
+      </div>
+    </div>
+    <p class="footer__legal">
+      MIT licensed · No telemetry · This site uses Plausible Analytics (cookieless, no fingerprinting)
+    </p>
+  </div>
+</footer>
+
+<div class="sr-only" id="copy-status" role="status" aria-live="polite"></div>
+
+<!-- ============================================================
+     JS
+============================================================ -->
+<script>
+  // ── Theme switch ─────────────────────────────────────────────────
+  // Storage key `px-theme` is preserved so returning visitors keep their
+  // choice. Nothing is written until the visitor explicitly picks a theme;
+  // until then the page follows prefers-color-scheme live.
+  (function() {
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll('[data-theme-set]');
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+
+    function read() { try { return localStorage.getItem('px-theme'); } catch (e) { return null; } }
+    function write(t) { try { localStorage.setItem('px-theme', t); } catch (e) {} }
+
+    function render(t) {
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute('aria-pressed', buttons[i].getAttribute('data-theme-set') === t ? 'true' : 'false');
+      }
+    }
+    function apply(t, persist) {
+      root.setAttribute('data-theme', t);
+      if (persist) write(t);
+      render(t);
+    }
+
+    var stored = read();
+    apply(stored === 'light' || stored === 'dark' ? stored : (mq.matches ? 'dark' : 'light'), false);
+
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function() { apply(this.getAttribute('data-theme-set'), true); });
+    }
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function(e) { if (!read()) apply(e.matches ? 'dark' : 'light', false); });
+    }
+  })();
+
+  // ── Copy buttons ─────────────────────────────────────────────────
+  // States: idle → busy → success | error → idle. The visible label and a
+  // polite live region both change so the result is announced.
+  (function() {
+    var status = document.getElementById('copy-status');
+    var RESET_MS = 1800;
+
+    function legacyCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+    }
+
+    function copy(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).catch(function() { return legacyCopy(text); });
+      }
+      return legacyCopy(text);
+    }
+
+    document.querySelectorAll('.copy-btn[data-copy]').forEach(function(btn) {
+      var idle = btn.textContent;
+      var timer = null;
+      function settle(label, cls, announce) {
+        btn.removeAttribute('aria-busy');
+        btn.textContent = label;
+        btn.classList.add(cls);
+        if (status) status.textContent = announce;
+        clearTimeout(timer);
+        timer = setTimeout(function() {
+          btn.textContent = idle;
+          btn.classList.remove('is-success', 'is-error');
+          if (status) status.textContent = '';
+        }, RESET_MS);
+      }
+      btn.addEventListener('click', function() {
+        if (btn.getAttribute('aria-busy') === 'true') return;
+        btn.setAttribute('aria-busy', 'true');
+        btn.classList.remove('is-success', 'is-error');
+        copy(btn.getAttribute('data-copy'))
+          .then(function() { settle('copied!', 'is-success', 'Command copied to clipboard'); })
+          .catch(function() { settle('failed', 'is-error', 'Copy failed — select the command and copy it manually'); });
+      });
+    });
+  })();
+
+  // ── Incidents carousel ──────────────────────────────────────────
+  (function() {
+    var track    = document.getElementById('incidents-track');
+    var prev     = document.getElementById('carousel-prev');
+    var next     = document.getElementById('carousel-next');
+    var dotsWrap = document.getElementById('carousel-dots');
+    if (!track) return;
+
+    var slides  = track.querySelectorAll('.carousel-slide');
+    var total   = slides.length;
+    var current = 0;
+    var autoTimer = null;
+    var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    function gapPx() {
+      var g = parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap);
+      return isNaN(g) ? 24 : g;
+    }
+    function visibleCount() {
+      var w = window.innerWidth;
+      return w < 600 ? 1 : (w < 960 ? 2 : 3);
+    }
+
+    function setWidths() {
+      var wrapper = track.parentElement;
+      var w       = wrapper.getBoundingClientRect().width - 8; // wrapper padding: 4px each side
+      var vis     = visibleCount();
+      var slideW  = (w - gapPx() * (vis - 1)) / vis;
+      slides.forEach(function(s) { s.style.width = slideW + 'px'; s.style.minWidth = slideW + 'px'; });
+      goTo(current);
+    }
+
+    function maxIdx() { return Math.max(0, total - visibleCount()); }
+
+    function buildDots() {
+      dotsWrap.innerHTML = '';
+      var count = maxIdx() + 1;
+      for (var i = 0; i < count; i++) {
+        var dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = 'carousel-dot' + (i === current ? ' active' : '');
+        dot.setAttribute('aria-label', 'Go to slide ' + (i + 1) + ' of ' + count);
+        dot.setAttribute('data-idx', i);
+        dotsWrap.appendChild(dot);
+      }
+    }
+
+    function getSlideWidth() {
+      if (!slides[0]) return 0;
+      return slides[0].getBoundingClientRect().width + gapPx();
+    }
+
+    function goTo(idx) {
+      current = Math.max(0, Math.min(idx, maxIdx()));
+      track.style.transform = 'translateX(-' + (current * getSlideWidth()) + 'px)';
+      dotsWrap.querySelectorAll('.carousel-dot').forEach(function(d, i) {
+        d.classList.toggle('active', i === current);
+        d.setAttribute('aria-current', i === current ? 'true' : 'false');
+      });
+    }
+
+    function advance() { goTo(current + 1 > maxIdx() ? 0 : current + 1); }
+    function retreat() { goTo(current - 1 < 0 ? maxIdx() : current - 1); }
+
+    // Autoplay only when the visitor has not asked for reduced motion and the tab is visible.
+    function startAuto() {
+      stopAuto();
+      if (reduceMotion.matches || document.hidden) return;
+      autoTimer = setInterval(advance, 5000);
+    }
+    function stopAuto()  { clearInterval(autoTimer); autoTimer = null; }
+
+    buildDots();
+    setWidths();
+    startAuto();
+
+    next.addEventListener('click', function() { stopAuto(); advance(); startAuto(); });
+    prev.addEventListener('click', function() { stopAuto(); retreat(); startAuto(); });
+
+    dotsWrap.addEventListener('click', function(e) {
+      var btn = e.target.closest('.carousel-dot');
+      if (!btn) return;
+      stopAuto(); goTo(parseInt(btn.getAttribute('data-idx'), 10)); startAuto();
+    });
+
+    var wrapper = track.parentElement;
+    wrapper.addEventListener('mouseenter', stopAuto);
+    wrapper.addEventListener('mouseleave', startAuto);
+    wrapper.addEventListener('focusin', stopAuto);
+    wrapper.addEventListener('focusout', startAuto);
+    wrapper.addEventListener('touchstart', stopAuto, { passive: true });
+    wrapper.addEventListener('touchend',   startAuto, { passive: true });
+    document.addEventListener('visibilitychange', startAuto);
+    if (reduceMotion.addEventListener) reduceMotion.addEventListener('change', startAuto);
+
+    var touchStartX = 0;
+    track.addEventListener('touchstart', function(e) { touchStartX = e.touches[0].clientX; }, { passive: true });
+    track.addEventListener('touchend', function(e) {
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 40) { stopAuto(); dx < 0 ? advance() : retreat(); startAuto(); }
+    }, { passive: true });
+
+    var resizeTimer = null;
+    window.addEventListener('resize', function() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function() { current = Math.min(current, maxIdx()); buildDots(); setWidths(); }, 80);
+    });
+  })();
+
+  // ── Nix quip rotation ────────────────────────────────────────────
+  (function() {
+    var quipEl = document.getElementById('nix-quip');
+    if (!quipEl) return;
+    var quips = [
+      'Found 3. Again.',
+      'That\'s an AWS key.',
+      'Rotated. Right?',
+      'Classic.',
+      'This one\'s live.',
+      'Seen this before.',
+      'Not my first export.',
+      'sk- prefix. Lovely.',
+      'AKIA. Every time.',
+      'Did you mean to paste that?',
+      'Exported Monday. Found Tuesday.',
+      'That DB string works. I checked.',
+      'Four conversations. Eight keys.',
+      'You\'re welcome.',
+    ];
+    var idx = Math.floor(Math.random() * quips.length);
+    quipEl.textContent = quips[idx];
+    setInterval(function() {
+      quipEl.style.opacity = '0';
+      setTimeout(function() {
+        idx = (idx + 1) % quips.length;
+        quipEl.textContent = quips[idx];
+        quipEl.style.opacity = '1';
+      }, 300);
+    }, 7000);
+  })();
+</script>
+
+</body>
+</html>
