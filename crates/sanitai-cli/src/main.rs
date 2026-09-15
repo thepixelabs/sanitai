@@ -869,47 +869,89 @@ fn print_human(findings: &[Finding]) {
         println!("sanitai: no findings.");
         return;
     }
-    for f in findings {
-        let conf = match f.confidence {
+    // One block per distinct secret. Conversation exports echo the same
+    // `.env` line on every read/edit, so a flat per-occurrence list buries
+    // eight real connection strings under seventy rows. JSON/SARIF remain
+    // per occurrence for programmatic consumers.
+    let mut groups = sanitai_core::finding::group_by_secret(findings);
+    groups.sort_by_key(|g| match g.confidence() {
+        Confidence::High => 0u8,
+        Confidence::Medium => 1,
+        Confidence::Low => 2,
+    });
+    /// Locations printed per secret before collapsing the rest into `+N more`.
+    const MAX_LOCATIONS: usize = 3;
+
+    for g in &groups {
+        let f = g.representative;
+        let conf = match g.confidence() {
             Confidence::High => "HIGH  ",
             Confidence::Medium => "MEDIUM",
             Confidence::Low => "LOW   ",
         };
-        let file = f.turn_id.0.display();
-        // Prefer the source line when the parser produced one; fall back to
-        // the message index. The fallback matches the in-TUI rule (see
-        // `results.rs::location_label`) so human and TUI rendering agree.
-        let location = match f.line_in_file {
-            Some(n) => format!("L{n}"),
-            None => format!("msg {}", f.turn_id.1),
-        };
         let raw_id = f.detector_id;
         let pretty = sanitai_detectors::display_name_for(raw_id);
         let det = if pretty.is_empty() { raw_id } else { pretty };
-        let bs = f.byte_range.start;
-        let be = f.byte_range.end;
-        if f.transform.is_empty() {
-            println!("[{conf}] {file}  {location}  {det}  bytes={bs}..{be}");
+        let fp = f.fingerprint_hex();
+        let count = g.count();
+        let files = g.file_count();
+        let where_ = if count == 1 {
+            String::new()
         } else {
-            let chain: Vec<&str> = f
-                .transform
-                .0
-                .iter()
-                .map(|t| match t {
-                    Transform::Base64 => "base64",
-                    Transform::Hex => "hex",
-                    Transform::UrlEncoded => "url",
-                    Transform::Gzip => "gzip",
-                    Transform::HtmlEntity => "html",
-                })
-                .collect();
-            println!(
-                "[{conf}] {file}  {location}  {det}  bytes={bs}..{be}  via={}",
-                chain.join("+")
-            );
+            format!(
+                "  \u{d7}{count} in {files} file{}",
+                if files == 1 { "" } else { "s" }
+            )
+        };
+        println!("[{conf}] {det}  [{fp}]{where_}");
+        for occ in g.occurrences.iter().take(MAX_LOCATIONS) {
+            println!("         {}", human_location(occ));
+        }
+        if count > MAX_LOCATIONS {
+            println!("         +{} more", count - MAX_LOCATIONS);
         }
     }
-    eprintln!("\n{} finding(s).", findings.len());
+    // Tally on stderr so stdout stays machine-parseable when piped; the
+    // `finding(s)` token is part of that contract (see tests/pipe_mode.rs).
+    eprintln!(
+        "\n{} distinct secret(s), {} finding(s).",
+        groups.len(),
+        findings.len()
+    );
+}
+
+/// `<file>  <Lnnn|msg N>  bytes=a..b[  via=chain]` — one occurrence.
+fn human_location(f: &Finding) -> String {
+    let file = f.turn_id.0.display();
+    // Prefer the source line when the parser produced one; fall back to
+    // the message index. The fallback matches the in-TUI rule (see
+    // `results.rs::location_label`) so human and TUI rendering agree.
+    let location = match f.line_in_file {
+        Some(n) => format!("L{n}"),
+        None => format!("msg {}", f.turn_id.1),
+    };
+    let bs = f.byte_range.start;
+    let be = f.byte_range.end;
+    if f.transform.is_empty() {
+        format!("{file}  {location}  bytes={bs}..{be}")
+    } else {
+        let chain: Vec<&str> = f
+            .transform
+            .0
+            .iter()
+            .map(|t| match t {
+                Transform::Base64 => "base64",
+                Transform::Hex => "hex",
+                Transform::UrlEncoded => "url",
+                Transform::Gzip => "gzip",
+                Transform::HtmlEntity => "html",
+            })
+            .collect();
+        format!(
+            "{file}  {location}  bytes={bs}..{be}  via={}",
+            chain.join("+")
+        )
+    }
 }
 
 fn print_json(findings: &[Finding]) -> Result<()> {

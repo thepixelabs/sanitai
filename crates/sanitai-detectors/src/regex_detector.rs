@@ -81,6 +81,105 @@ pub fn luhn_valid(s: &str) -> bool {
 }
 
 /// IBAN mod-97 validation per ISO 13616.
+/// IBAN length by country code, per the SWIFT IBAN Registry. An IBAN whose
+/// country is not in the registry, or whose length is wrong for it, is not
+/// an IBAN no matter what mod-97 says — 1 in 97 random alphanumerics pass
+/// the checksum, and trademark ids (`US50…`), VINs and tracking numbers
+/// were doing exactly that.
+pub fn iban_length_for(country: &str) -> Option<usize> {
+    Some(match country {
+        "AL" => 28,
+        "AD" => 24,
+        "AT" => 20,
+        "AZ" => 28,
+        "BH" => 22,
+        "BY" => 28,
+        "BE" => 16,
+        "BA" => 20,
+        "BR" => 29,
+        "BG" => 22,
+        "BI" => 27,
+        "CR" => 22,
+        "HR" => 21,
+        "CY" => 28,
+        "CZ" => 24,
+        "DK" => 18,
+        "DJ" => 27,
+        "DO" => 28,
+        "EG" => 29,
+        "SV" => 28,
+        "EE" => 20,
+        "FK" => 18,
+        "FO" => 18,
+        "FI" => 18,
+        "FR" => 27,
+        "GE" => 22,
+        "DE" => 22,
+        "GI" => 23,
+        "GR" => 27,
+        "GL" => 18,
+        "GT" => 28,
+        "VA" => 22,
+        "HU" => 28,
+        "IS" => 26,
+        "IQ" => 23,
+        "IE" => 22,
+        "IL" => 23,
+        "IT" => 27,
+        "JO" => 30,
+        "KZ" => 20,
+        "XK" => 20,
+        "KW" => 30,
+        "LV" => 21,
+        "LB" => 28,
+        "LY" => 25,
+        "LI" => 21,
+        "LT" => 20,
+        "LU" => 20,
+        "MT" => 31,
+        "MR" => 27,
+        "MU" => 30,
+        "MD" => 24,
+        "MC" => 27,
+        "MN" => 20,
+        "ME" => 22,
+        "NL" => 18,
+        "NI" => 28,
+        "MK" => 19,
+        "NO" => 15,
+        "OM" => 23,
+        "PK" => 24,
+        "PS" => 29,
+        "PL" => 28,
+        "PT" => 25,
+        "QA" => 29,
+        "RO" => 24,
+        "RU" => 33,
+        "LC" => 32,
+        "SM" => 27,
+        "ST" => 25,
+        "SA" => 24,
+        "RS" => 22,
+        "SC" => 31,
+        "SK" => 24,
+        "SI" => 19,
+        "SO" => 23,
+        "ES" => 24,
+        "SD" => 18,
+        "SE" => 24,
+        "CH" => 21,
+        "TL" => 23,
+        "TN" => 24,
+        "TR" => 26,
+        "UA" => 29,
+        "AE" => 23,
+        "GB" => 22,
+        "VG" => 24,
+        "YE" => 30,
+        _ => return None,
+    })
+}
+
 pub fn iban_valid(s: &str) -> bool {
     let cleaned: String = s
         .chars()
@@ -88,6 +187,9 @@ pub fn iban_valid(s: &str) -> bool {
         .map(|c| c.to_ascii_uppercase())
         .collect();
     if cleaned.len() < 15 || cleaned.len() > 34 {
+        return false;
+    }
+    if iban_length_for(&cleaned[..2]) != Some(cleaned.len()) {
         return false;
     }
     if !cleaned.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -278,6 +380,27 @@ fn base58check_gate(s: &str) -> Option<Confidence> {
     }
 }
 
+/// Google API keys that are public by design and published in Google's own
+/// docs or shipped inside YouTube's web/mobile clients. They pass the
+/// `AIza…` format check but are nobody's secret; a scanner that reports the
+/// key from every `youtubei/v1/player?key=` URL trains people to ignore it.
+const PUBLIC_GOOGLE_API_KEYS: &[&str] = &[
+    // Example key in developers.google.com credential docs.
+    "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe",
+    // YouTube InnerTube: web client.
+    "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    // YouTube InnerTube: Android client.
+    "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+];
+
+fn gcp_api_key_gate(s: &str) -> Option<Confidence> {
+    if PUBLIC_GOOGLE_API_KEYS.contains(&s) {
+        None
+    } else {
+        Some(Confidence::High)
+    }
+}
+
 fn iban_gate(s: &str) -> Option<Confidence> {
     if iban_valid(s) {
         Some(Confidence::High)
@@ -288,7 +411,183 @@ fn iban_gate(s: &str) -> Option<Confidence> {
 
 /// Generic assignment heuristic: the captured value is only a secret if it
 /// has enough entropy — otherwise it might just be `password=changeme`.
+/// The value part of a `key = value` match: everything after the first
+/// `=`/`:` separator, minus surrounding whitespace and an opening quote.
+fn assignment_value(s: &str) -> &str {
+    let sep = s.find(['=', ':']).map(|i| i + 1).unwrap_or(0);
+    s[sep..].trim_start().trim_start_matches(['\'', '"', '`'])
+}
+
+/// True when an assignment's right-hand side is not a literal secret: a
+/// reference to one (`process.env.X`, `${X}`, `!secret x`), a type
+/// annotation (`password: string,`), a call (`token = randomBytes(32)`) or
+/// a placeholder (`<your-key>`, `changeme`, `sk-...`). In a corpus of
+/// developer transcripts these were more than two thirds of the generic
+/// assignment hits — code that *handles* a secret is not a leak of one.
+fn is_non_literal_value(v: &str) -> bool {
+    if v.is_empty() {
+        return true;
+    }
+    // Templates and placeholders by their first character(s). `$` is only a
+    // reference when it looks like one — `${DB_PASS}`, `$(cmd)`, `$DB_PASS` —
+    // so a password that merely starts with `$` or `!` still counts.
+    if v.starts_with(['<', '[', '{', '('])
+        || v.starts_with("...")
+        || v.starts_with("***")
+        || v.starts_with("${")
+        || v.starts_with("$(")
+        || (v.starts_with('%') && v.ends_with('%'))
+        || (v.starts_with('$')
+            && v.len() > 1
+            && v[1..]
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+    {
+        return true;
+    }
+    // A call (`randomBytes(32)`, `os.getenv("X")`) or index expression.
+    if let Some(paren) = v.find('(') {
+        let callee = &v[..paren];
+        if !callee.is_empty()
+            && callee
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == ':')
+        {
+            return true;
+        }
+    }
+    if v.contains("[\"") || v.contains("['") {
+        return true;
+    }
+    // Dotted access rooted in a well-known runtime/config object. Rooting on
+    // a known name (rather than "anything dotted") keeps JWTs and dotted
+    // tokens intact.
+    const ROOTS: &[&str] = &[
+        "process",
+        "os",
+        "env",
+        "ENV",
+        "environ",
+        "System",
+        "Deno",
+        "Bun",
+        "import",
+        "config",
+        "configs",
+        "cfg",
+        "conf",
+        "settings",
+        "this",
+        "self",
+        "ctx",
+        "context",
+        "req",
+        "request",
+        "res",
+        "params",
+        "options",
+        "opts",
+        "args",
+        "props",
+        "state",
+        "data",
+        "secrets",
+        "secret",
+        "vars",
+        "var",
+        "local",
+        "module",
+        "credentials",
+        "creds",
+        "keychain",
+        "vault",
+        "window",
+        "globalThis",
+        "global",
+        "app",
+        "Rails",
+        "django",
+        "flask",
+        "std",
+        "crate",
+        "super",
+    ];
+    if let Some((root, rest)) = v.split_once(['.', ':']) {
+        if !rest.is_empty()
+            && ROOTS.contains(&root)
+            && rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || c == ':')
+        {
+            return true;
+        }
+    }
+    // Type annotations in signatures / interfaces / SQL DDL.
+    const TYPES: &[&str] = &[
+        "string",
+        "String",
+        "str",
+        "&str",
+        "bool",
+        "boolean",
+        "number",
+        "int",
+        "integer",
+        "float",
+        "Option",
+        "Vec",
+        "Box",
+        "Secret",
+        "SecretString",
+        "varchar",
+        "VARCHAR",
+        "nvarchar",
+        "text",
+        "TEXT",
+        "char",
+        "CHAR",
+        "Text",
+        "bytes",
+        "Bytes",
+        "any",
+        "unknown",
+        "object",
+    ];
+    let type_end = v
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '&'))
+        .unwrap_or(v.len());
+    if TYPES.contains(&&v[..type_end]) {
+        return true;
+    }
+    // Placeholder vocabulary: some words disqualify anywhere in the value,
+    // others only as a prefix (a real password may contain "todo").
+    let lower = v.to_ascii_lowercase();
+    const ANYWHERE: &[&str] = &[
+        "your",
+        "xxx",
+        "placeholder",
+        "changeme",
+        "change-me",
+        "change_me",
+        "redacted",
+        "<",
+        "...",
+    ];
+    const PREFIX: &[&str] = &[
+        "example", "insert", "replace", "todo", "fixme", "sample", "dummy", "fake",
+    ];
+    if ANYWHERE.iter().any(|p| lower.contains(p)) || PREFIX.iter().any(|p| lower.starts_with(p)) {
+        return true;
+    }
+    // `null`, `none`, `undefined`, `true`, `false` and friends.
+    matches!(
+        lower.trim_end_matches([',', ';', ')']),
+        "null" | "none" | "nil" | "undefined" | "true" | "false" | "required" | "optional"
+    )
+}
+
 fn generic_assign_gate(s: &str) -> Option<Confidence> {
+    if is_non_literal_value(assignment_value(s)) {
+        return None;
+    }
     // The match text begins with the literal key prefix (e.g. "password=")
     // so we check entropy of the whole match. A high threshold prevents
     // noise like `password=password` or `secret=changeme`.
@@ -298,6 +597,127 @@ fn generic_assign_gate(s: &str) -> Option<Confidence> {
     } else {
         None
     }
+}
+
+/// Grade a `scheme://user:pass@host…` connection URL by what the credential
+/// is actually worth.
+///
+/// * Placeholder password (`<password>`, `${DB_PASS}`, `PASSWORD`, `xxx`) →
+///   not a finding.
+/// * Local/dev host (`localhost`, loopback, `host.docker.internal`, a bare
+///   compose/k8s service name) with a trivial password (equal to the user,
+///   or `postgres`/`root`/`secret`/…) → Low. Every `docker-compose.yml` in
+///   the world has one of these; reporting them as High buries the real
+///   ones.
+/// * Local host, non-trivial password → Medium.
+/// * Anything else → High.
+fn db_url_gate(s: &str) -> Option<Confidence> {
+    let rest = s.split_once("://")?.1;
+    let (userinfo, host) = rest.rsplit_once('@')?;
+    let (user, pass) = match userinfo.split_once(':') {
+        Some((u, p)) => (u, p),
+        None => ("", userinfo),
+    };
+    // `[2001:db8::1]:5432` — a bracketed IPv6 literal contains `:`, so
+    // take the bracket body before falling back to the port/path split.
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(v6),
+        None => host.split([':', '/', '?']).next().unwrap_or(host),
+    };
+    if pass.is_empty() || is_placeholder_password(pass) {
+        return None;
+    }
+    if is_local_host(host) {
+        if is_trivial_password(pass, user) {
+            Some(Confidence::Low)
+        } else {
+            Some(Confidence::Medium)
+        }
+    } else {
+        Some(Confidence::High)
+    }
+}
+
+fn is_placeholder_password(pass: &str) -> bool {
+    if pass.starts_with(['<', '{', '[', '*', '.']) || (pass.starts_with('%') && pass.ends_with('%'))
+    {
+        return true;
+    }
+    // `$` is a reference only when it looks like one — `${DB_PASS}`,
+    // `$(cmd)`, `$DB_PASS` — so a password that merely starts with `$`
+    // still counts (same rule as `is_non_literal_value`).
+    if pass.starts_with("${")
+        || pass.starts_with("$(")
+        || (pass.starts_with('$')
+            && pass[1..]
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+    {
+        return true;
+    }
+    let lower = pass.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "password"
+            | "pass"
+            | "passwd"
+            | "pwd"
+            | "secret"
+            | "xxx"
+            | "xxxx"
+            | "changeme"
+            | "redacted"
+    ) || lower.starts_with("your")
+        || lower.contains("example")
+        || lower.contains("placeholder")
+}
+
+fn is_trivial_password(pass: &str, user: &str) -> bool {
+    if pass.len() < 4 || (!user.is_empty() && pass.eq_ignore_ascii_case(user)) {
+        return true;
+    }
+    matches!(
+        pass.to_ascii_lowercase().as_str(),
+        "postgres"
+            | "postgresql"
+            | "mysql"
+            | "mongo"
+            | "mongodb"
+            | "redis"
+            | "root"
+            | "admin"
+            | "test"
+            | "dev"
+            | "guest"
+            | "1234"
+            | "12345"
+            | "123456"
+            | "12345678"
+            | "password123"
+            | "devpassword"
+    )
+}
+
+/// `localhost`, loopback, docker's host alias, `*.local`, or a single-label
+/// name such as `db` / `postgres-postgresql` (a compose or k8s service —
+/// unreachable from outside the stack).
+fn is_local_host(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+    if h.is_empty() {
+        return false;
+    }
+    if matches!(
+        h,
+        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
+    ) || h.starts_with("127.")
+        || h.ends_with(".local")
+        || h.ends_with(".localhost")
+        || h.ends_with(".internal")
+    {
+        return true;
+    }
+    // Single label, not an IP: `db`, `postgres`, `redis-master`.
+    !h.contains('.') && !h.contains(':') && !h.chars().all(|c| c.is_ascii_digit())
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +939,7 @@ fn build_rules() -> Vec<Rule> {
             category: Category::Credential,
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"postgres(?:ql)?://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
-            validate: None,
+            validate: Some(db_url_gate),
             keywords: None,
             use_stopwords: false,
         },
@@ -539,7 +959,7 @@ fn build_rules() -> Vec<Rule> {
             category: Category::Credential,
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"mongodb(?:\+srv)?://[^\s:@/]+:[^\s@/]+@[^\s/]+")),
-            validate: None,
+            validate: Some(db_url_gate),
             keywords: None,
             use_stopwords: false,
         },
@@ -549,7 +969,7 @@ fn build_rules() -> Vec<Rule> {
             category: Category::Credential,
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"redis(?:s)?://(?:[^\s:@/]+:)?[^\s@/]+@[^\s/]+")),
-            validate: None,
+            validate: Some(db_url_gate),
             keywords: None,
             use_stopwords: false,
         },
@@ -614,7 +1034,7 @@ fn build_rules() -> Vec<Rule> {
             category: Category::Credential,
             base_confidence: Confidence::High,
             matcher: Matcher::Plain(plain(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
-            validate: None,
+            validate: Some(gcp_api_key_gate),
             keywords: None,
             use_stopwords: false,
         },
@@ -670,7 +1090,13 @@ fn build_rules() -> Vec<Rule> {
             display_name: "PyPI Token",
             category: Category::Credential,
             base_confidence: Confidence::High,
-            matcher: Matcher::Plain(plain(r"\bpypi-[0-9A-Za-z\-_]{32,}\b")),
+            // Every PyPI API token is a macaroon whose base64 body opens with
+            // the `pypi.org` location, i.e. the literal `pypi-AgEIcHlwaS5vcmc`
+            // (`pypi-AgENdGVzdC5weXBpLm9yZw` for test.pypi.org). Anchoring on
+            // it stops URL slugs like `…-npm-pypi-supply-chain-…`.
+            matcher: Matcher::Plain(plain(
+                r"\bpypi-(?:AgEIcHlwaS5vcmc|AgENdGVzdC5weXBpLm9yZw)[0-9A-Za-z\-_]{30,}\b",
+            )),
             validate: None,
             keywords: None,
             use_stopwords: false,
@@ -1093,9 +1519,19 @@ fn build_rules() -> Vec<Rule> {
             display_name: "Vercel Access Token",
             category: Category::Credential,
             base_confidence: Confidence::Medium,
-            matcher: Matcher::Plain(plain(r"\b[A-Za-z0-9]{24}\b")),
+            // 24 alphanumerics is not distinctive on its own (Turnstile site
+            // keys, build ids, …), so the token must sit right after a
+            // `VERCEL_TOKEN=` / `vercel token:` / `--token` context. The
+            // keyword gate below is only a prefilter.
+            matcher: {
+                let (re, idx) = plain_cap(
+                    r#"(?i)(?:vercel[\w .-]{0,24}?token|\bvercel_token|--token)["'`]?\s*[=:]?\s*["'`]?([A-Za-z0-9]{24})\b"#,
+                    1,
+                );
+                Matcher::PlainCap(re, idx)
+            },
             validate: Some(entropy_gate_3_5),
-            keywords: Some(&["vercel", "VERCEL", "VERCEL_TOKEN", "vercel_token"]),
+            keywords: Some(&["vercel", "Vercel", "VERCEL", "VERCEL_TOKEN", "vercel_token"]),
             use_stopwords: true,
         },
         // -----------------------------------------------------------------
@@ -1297,10 +1733,25 @@ fn build_rules() -> Vec<Rule> {
             display_name: "Cloudflare API Token",
             category: Category::Credential,
             base_confidence: Confidence::Medium,
-            matcher: Matcher::Plain(plain(r"\b[A-Za-z0-9_-]{40}\b")),
+            // Any 40-char run in a chunk that merely *mentions* Cloudflare
+            // (a link to community.cloudflare.com, say) used to fire: URL
+            // slugs, challenge cookies, `google-site-verification=…`. The
+            // token must now follow an assignment or bearer context. The
+            // keyword gate still requires a Cloudflare mention in the chunk,
+            // which is what lets the bare `api_token =` of a Terraform
+            // `provider "cloudflare" { … }` block count as context. The
+            // optional quote after the key admits `"CLOUDFLARE_API_TOKEN": "…"`.
+            matcher: {
+                let (re, idx) = plain_cap(
+                    r#"(?i)(?:cloudflare[\w .-]{0,24}?(?:token|key)|\bcf_api_token|\bcf_token|\bapi_token|authorization:\s*bearer)["'`]?\s*[=:]?\s*["'`]?([A-Za-z0-9_-]{40})\b"#,
+                    1,
+                );
+                Matcher::PlainCap(re, idx)
+            },
             validate: Some(entropy_gate_4_0),
             keywords: Some(&[
                 "cloudflare",
+                "Cloudflare",
                 "CLOUDFLARE",
                 "CLOUDFLARE_API_TOKEN",
                 "CF_API_TOKEN",
@@ -1862,6 +2313,266 @@ mod tests {
         assert!(high
             .iter()
             .any(|f| f.detector_id == "generic_password_assignment"));
+    }
+
+    fn has(findings: &[Finding], det: &str) -> bool {
+        findings.iter().any(|f| f.detector_id == det)
+    }
+
+    fn conf_of(findings: &[Finding], det: &str) -> Option<Confidence> {
+        findings
+            .iter()
+            .find(|f| f.detector_id == det)
+            .map(|f| f.confidence.clone())
+    }
+
+    #[test]
+    fn generic_assignment_ignores_references_types_and_placeholders() {
+        const DET: &str = "generic_password_assignment";
+        // Code that *handles* a secret is not a leak of one.
+        for input in [
+            "password: process.env.DB_PASSWORD || 'sa',",
+            "clientSecret: process.env.ARM_CLIENT_SECRET,",
+            "api_key = os.environ[\"OPENAI_API_KEY\"]",
+            "apiKey: import.meta.env.VITE_SUPABASE_KEY",
+            "password: ${DB_PASSWORD_FROM_VAULT}",
+            "token: !secret home_assistant_token",
+            "secret = settings.SECRET_KEY_FALLBACK",
+            "password: string; confirmPassword: string;",
+            "token = randomBytes(32).toString('base64url')",
+            "token = mx.zeros((batch, prompt_len))",
+            "JWT_SECRET=<generate-with-openssl-rand>",
+            "API_KEY=your-api-key-goes-here-1234",
+            "password=...&next=/dashboard",
+            "token: string }> {",
+        ] {
+            assert!(!has(&scan_for(input), DET), "should not fire on {input:?}");
+        }
+        // Literal values still fire — including ones that start with `$`,
+        // `!` or `@`, or contain parentheses.
+        for input in [
+            "password = 'Xa7!pQ9vR2mK4nL8zT5jB3hC6d'",
+            "INTERNAL_API_KEY: \"7D4pQ9vR2mK4nL8zT5jB3hC6dXa7WqZ1\"",
+            "DB_PASSWORD=DevPassMon123!Xq9",
+            "password=$ecretXq9vR2mK4nL8",
+            "password=!Xq9vR2mK4nL8zT5j",
+            "password=@Xq9vR2mK4nL8zT5j",
+            "password=P@ss(Xq9vR2mK4)nL8",
+        ] {
+            assert!(has(&scan_for(input), DET), "should fire on {input:?}");
+        }
+    }
+
+    #[test]
+    fn db_url_grades_local_defaults_low_and_remote_high() {
+        const DET: &str = "postgres_url";
+        // compose / k8s defaults: password == user, local host.
+        assert_eq!(
+            conf_of(
+                &scan_for("DATABASE_URL=postgres://cookday:cookday@localhost:5433/cookday"),
+                DET
+            ),
+            Some(Confidence::Low)
+        );
+        assert_eq!(
+            conf_of(
+                &scan_for("postgresql://postgres:postgres@postgres-postgresql:5432/app"),
+                DET
+            ),
+            Some(Confidence::Low)
+        );
+        // Local host but a real-looking password: worth a look.
+        assert_eq!(
+            conf_of(
+                &scan_for("postgres://app:Xq9!vR2mK4nL8zT5@localhost:5432/app"),
+                DET
+            ),
+            Some(Confidence::Medium)
+        );
+        // Remote host: High regardless of how weak the password is.
+        assert_eq!(
+            conf_of(
+                &scan_for("postgres://postgres:postgres@db.prod.example.net:5432/app"),
+                DET
+            ),
+            Some(Confidence::High)
+        );
+        assert_eq!(
+            conf_of(
+                &scan_for("DB=postgres://user:hunter2@db.example.com/app"),
+                DET
+            ),
+            Some(Confidence::High)
+        );
+        // Placeholders are not findings.
+        for input in [
+            "postgres://USER:PASSWORD@HOST:PORT/DB",
+            "postgres://medusa:***@localhost:5432/medusa",
+            "postgres://app:${DB_PASSWORD}@db.internal/app",
+            "postgres://app:<password>@db.example.com/app",
+        ] {
+            assert!(!has(&scan_for(input), DET), "should not fire on {input:?}");
+        }
+        // A password that merely *starts* with `$` is a literal, not a
+        // `${VAR}` / `$VAR` reference — same rule as the generic gate.
+        assert_eq!(
+            conf_of(
+                &scan_for("postgres://app:$uperS3cret9@db.example.com:5432/app"),
+                DET
+            ),
+            Some(Confidence::High)
+        );
+        for input in [
+            "postgres://app:$DB_PASSWORD@db.example.com/app",
+            "postgres://app:$(cat pw)@db.example.com/app",
+        ] {
+            assert!(!has(&scan_for(input), DET), "should not fire on {input:?}");
+        }
+        // Bracketed IPv6 hosts: loopback is local, a global address is not.
+        assert_eq!(
+            conf_of(
+                &scan_for("postgres://app:Xq9vR2mK4nL8zT5@[::1]:5432/app"),
+                DET
+            ),
+            Some(Confidence::Medium)
+        );
+        assert_eq!(
+            conf_of(
+                &scan_for("postgres://app:Xq9vR2mK4nL8zT5@[fd12:3456::10]:5432/app"),
+                DET
+            ),
+            Some(Confidence::High)
+        );
+        // Same gate on the sibling rules.
+        assert_eq!(
+            conf_of(&scan_for("redis://:redis@redis:6379/0"), "redis_url"),
+            Some(Confidence::Low)
+        );
+        assert_eq!(
+            conf_of(
+                &scan_for("mongodb+srv://svc:Zk8!qP2mR4tY7wE1@cluster0.abc.mongodb.net/db"),
+                "mongodb_srv_url"
+            ),
+            Some(Confidence::High)
+        );
+    }
+
+    #[test]
+    fn cloudflare_token_needs_assignment_context() {
+        const DET: &str = "cloudflare_api_token";
+        let token = format!(
+            "SANITAIFAKE{}",
+            "0123456789abcdef"
+                .repeat(2)
+                .chars()
+                .take(29)
+                .collect::<String>()
+        );
+        // A chunk that merely mentions Cloudflare no longer turns every
+        // 40-char run into a token: URL slug, challenge cookie, verification tag.
+        for input in [
+            format!("see https://community.cloudflare.com/t/{token}-rule-cannot-activate/884843"),
+            format!("cloudflare cf_chl_opt = {{cH: '{token}.Tw-1788200171-1.2.1.1'}}"),
+            format!("cloudflare zone: \"google-site-verification={token}\""),
+        ] {
+            assert!(!has(&scan_for(&input), DET), "should not fire on {input:?}");
+        }
+        for input in [
+            format!("CLOUDFLARE_API_TOKEN={token}"),
+            format!("cloudflare_api_token = \"{token}\""),
+            format!("Cloudflare API token: {token}"),
+            format!("# cloudflare\ncurl -H 'Authorization: Bearer {token}' https://api.cloudflare.com/client/v4/zones"),
+            // Terraform provider block: the key is a bare `api_token`.
+            format!("provider \"cloudflare\" {{\n  api_token = \"{token}\"\n}}"),
+            // JSON / quoted-YAML key.
+            format!("{{\"CLOUDFLARE_API_TOKEN\": \"{token}\"}}"),
+            format!("'CLOUDFLARE_API_TOKEN': '{token}'"),
+        ] {
+            assert!(has(&scan_for(&input), DET), "should fire on {input:?}");
+        }
+    }
+
+    #[test]
+    fn vercel_token_needs_assignment_context() {
+        const DET: &str = "vercel_access_token";
+        let token = "Xq9vR2mK4nL8zT5jB3hC6dWa";
+        assert!(!has(
+            &scan_for(&format!("| Turnstile site key (vercel) | `{token}` |")),
+            DET
+        ));
+        assert!(has(&scan_for(&format!("VERCEL_TOKEN={token}")), DET));
+        assert!(has(
+            &scan_for(&format!("vercel deploy --token {token}")),
+            DET
+        ));
+        assert!(has(
+            &scan_for(&format!("{{\"VERCEL_TOKEN\": \"{token}\"}}")),
+            DET
+        ));
+    }
+
+    #[test]
+    fn pypi_token_is_anchored_on_macaroon_prefix() {
+        const DET: &str = "pypi_token";
+        // URL slug that used to match.
+        assert!(!has(
+            &scan_for(
+                "https://socket.dev/blog/large-scale-npm-pypi-supply-chain-attack-uncovered-2025"
+            ),
+            DET
+        ));
+        // Real shape: `pypi-AgEIcHlwaS5vcmc` + long base64 body.
+        let token = format!(
+            "pypi-AgEIcHlwaS5vcmc{}",
+            "AiQxMjM0NTY3OC1hYmNkLWVmZ2gtaWprbC1tbm9wcXJzdHV2AAIqWzMsIjEyMzQ1Njc4LWFiY2QiXQAABiB"
+                .repeat(2)
+        );
+        assert!(has(&scan_for(&format!("password = {token}")), DET));
+        // test.pypi.org issues macaroons located at `test.pypi.org`.
+        let test_token = format!(
+            "pypi-AgENdGVzdC5weXBpLm9yZw{}",
+            "IkMTIzNDU2NzgtYWJjZC1lZmdoLWlqa2wtbW5vcHFyc3R1dgACJFszLCIxMjM0NTY3OC1hYmNkIl0AAAYg"
+                .repeat(2)
+        );
+        assert!(has(&scan_for(&format!("TWINE_PASSWORD={test_token}")), DET));
+        // Other `pypi-` prefixed strings (an unrelated token, a slug) do not.
+        assert!(!has(
+            &scan_for("pypi-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefghijklmnop"),
+            DET
+        ));
+    }
+
+    #[test]
+    fn iban_requires_registry_country_and_length() {
+        // A WIPO ST13 trademark id: two letters, digits, passes mod-97 by
+        // chance, but `US` issues no IBANs.
+        assert!(!has(&scan_for(r#"{"ST13":"US502024123456789"}"#), "iban"));
+        assert!(!iban_valid("US50202412345678"));
+        // Right country, wrong length.
+        assert!(!iban_valid("GB82WEST123456987654321"));
+        // Registry entries still validate.
+        assert!(iban_valid("GB82WEST12345698765432"));
+        assert!(iban_valid("DE89370400440532013000"));
+        assert_eq!(iban_length_for("GB"), Some(22));
+        assert_eq!(iban_length_for("US"), None);
+    }
+
+    #[test]
+    fn gcp_api_key_skips_well_known_public_keys() {
+        const DET: &str = "gcp_api_key";
+        assert!(!has(
+            &scan_for("curl 'https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'"),
+            DET
+        ));
+        assert!(!has(
+            &scan_for("example: AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe"),
+            DET
+        ));
+        // Any other well-formed key still fires.
+        assert!(has(
+            &scan_for("key=AIzaSyA-1234567890abcdefghijklmnopqrstu"),
+            DET
+        ));
     }
 
     #[test]

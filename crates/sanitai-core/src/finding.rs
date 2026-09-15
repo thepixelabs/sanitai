@@ -246,6 +246,96 @@ pub fn dedupe_by_fingerprint(findings: &mut Vec<Finding>) {
     findings.retain(|f| seen.insert(f.fingerprint));
 }
 
+/// One distinct secret and every place it was seen.
+///
+/// Conversation exports repeat themselves: an assistant that reads a `.env`
+/// file, edits it, and reads it back produces the same `DATABASE_URL` line
+/// dozens of times in one session. Fingerprints are per occurrence (they mix
+/// in the turn index), so the raw findings list has no notion of "one secret,
+/// 48 places". Grouping by `(detector_id, matched_raw)` restores it for the
+/// human-facing views; JSON/SARIF stay per occurrence.
+#[derive(Debug)]
+pub struct FindingGroup<'a> {
+    /// The first occurrence in input order. Its fingerprint, excerpt and
+    /// location are what a row/line displays.
+    pub representative: &'a Finding,
+    /// Every occurrence, including `representative`, in input order.
+    pub occurrences: Vec<&'a Finding>,
+}
+
+impl FindingGroup<'_> {
+    pub fn count(&self) -> usize {
+        self.occurrences.len()
+    }
+
+    /// Number of distinct source files the secret appears in.
+    pub fn file_count(&self) -> usize {
+        let mut files: Vec<&Path> = self
+            .occurrences
+            .iter()
+            .map(|f| f.turn_id.0.as_path())
+            .collect();
+        files.sort_unstable();
+        files.dedup();
+        files.len()
+    }
+
+    /// Highest confidence across the occurrences. Occurrences share a
+    /// detector and value so this is normally uniform, but a validator that
+    /// looks at context could in principle grade two occurrences differently.
+    pub fn confidence(&self) -> Confidence {
+        let rank = |c: &Confidence| match c {
+            Confidence::High => 2u8,
+            Confidence::Medium => 1,
+            Confidence::Low => 0,
+        };
+        self.occurrences
+            .iter()
+            .map(|f| &f.confidence)
+            .max_by_key(|c| rank(c))
+            .cloned()
+            .unwrap_or_else(|| self.representative.confidence.clone())
+    }
+}
+
+/// Group findings by `(detector_id, matched_raw)`, preserving the input
+/// order of first occurrence. Callers that want severity ordering should sort
+/// the result by [`FindingGroup::confidence`].
+///
+/// A finding with an empty `matched_raw` (one reloaded from the history
+/// store, which never persists secret values) has no known value to group
+/// on, so it is keyed on its own fingerprint and always forms a group of one.
+/// Without that rule every historical finding from the same detector would
+/// collapse into a single `×N` row — and `f` would suppress all of them.
+pub fn group_by_secret<'a, I>(findings: I) -> Vec<FindingGroup<'a>>
+where
+    I: IntoIterator<Item = &'a Finding>,
+{
+    let mut index: std::collections::HashMap<(&'static str, &'a str, Option<[u8; 4]>), usize> =
+        std::collections::HashMap::new();
+    let mut groups: Vec<FindingGroup<'a>> = Vec::new();
+    for f in findings {
+        let key = if f.matched_raw.is_empty() {
+            (f.detector_id, "", Some(f.fingerprint))
+        } else {
+            (f.detector_id, f.matched_raw.as_str(), None)
+        };
+        match index.entry(key) {
+            std::collections::hash_map::Entry::Occupied(e) => {
+                groups[*e.get()].occurrences.push(f);
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(groups.len());
+                groups.push(FindingGroup {
+                    representative: f,
+                    occurrences: vec![f],
+                });
+            }
+        }
+    }
+    groups
+}
+
 /// Custom serde for `[u8; 4]` so JSON consumers see the 8-char hex string
 /// rather than a 4-element byte array. Only `serialize` is wired up via
 /// `#[serde(with = ...)]`; Finding has no Deserialize impl (see the
@@ -349,6 +439,85 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!(v[0].fingerprint, [1, 2, 3, 4]);
         assert_eq!(v[1].fingerprint, [5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn group_by_secret_merges_same_value_keeps_first_order() {
+        let mk = |file: &str, turn: usize, det: &'static str, raw: &str| Finding {
+            turn_id: (std::sync::Arc::new(std::path::PathBuf::from(file)), turn),
+            detector_id: det,
+            byte_range: 0..raw.len(),
+            matched_raw: raw.to_owned(),
+            transform: TransformChain::default(),
+            confidence: Confidence::High,
+            span_kind: SpanKind::Single,
+            synthetic: false,
+            role: None,
+            category: Category::Secret,
+            entropy_score: 0.0,
+            context_class: ContextClass::Unclassified,
+            fingerprint: [turn as u8, 0, 0, 0],
+            line_in_file: Some(turn as u32),
+            excerpt: String::new(),
+        };
+        let v = vec![
+            mk("/a.jsonl", 1, "postgres_url", "postgres://u:p@h/db"),
+            mk(
+                "/a.jsonl",
+                2,
+                "generic_password_assignment",
+                "password=hunter22",
+            ),
+            mk("/a.jsonl", 3, "postgres_url", "postgres://u:p@h/db"),
+            mk("/b.jsonl", 4, "postgres_url", "postgres://u:p@h/db"),
+            // Same value, different detector: a separate group.
+            mk("/b.jsonl", 5, "redis_url", "postgres://u:p@h/db"),
+        ];
+        let groups = group_by_secret(&v);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].representative.fingerprint, [1, 0, 0, 0]);
+        assert_eq!(groups[0].count(), 3);
+        assert_eq!(groups[0].file_count(), 2);
+        assert_eq!(groups[1].count(), 1);
+        assert_eq!(groups[2].representative.detector_id, "redis_url");
+        // Total occurrences are conserved.
+        assert_eq!(groups.iter().map(|g| g.count()).sum::<usize>(), v.len());
+    }
+
+    /// Findings reloaded from the history store never carry `matched_raw`
+    /// (the value is deliberately not persisted). Two such findings from
+    /// the same detector are *not* known to be the same secret, so they
+    /// must stay separate rows rather than collapsing into one `×N` group.
+    #[test]
+    fn group_by_secret_does_not_merge_findings_with_empty_matched_raw() {
+        let mk = |turn: usize, fp: u8| Finding {
+            turn_id: (
+                std::sync::Arc::new(std::path::PathBuf::from("/h.jsonl")),
+                turn,
+            ),
+            detector_id: "aws_access_key",
+            byte_range: 0..0,
+            matched_raw: String::new(),
+            transform: TransformChain::default(),
+            confidence: Confidence::High,
+            span_kind: SpanKind::Single,
+            synthetic: false,
+            role: None,
+            category: Category::Secret,
+            entropy_score: 0.0,
+            context_class: ContextClass::Unclassified,
+            fingerprint: [fp, 0, 0, 0],
+            line_in_file: None,
+            excerpt: String::new(),
+        };
+        let v = vec![mk(0, 1), mk(1, 2), mk(2, 3)];
+        let groups = group_by_secret(&v);
+        assert_eq!(
+            groups.len(),
+            3,
+            "historical findings (empty matched_raw) must not collapse into one group"
+        );
+        assert!(groups.iter().all(|g| g.count() == 1));
     }
 
     #[test]

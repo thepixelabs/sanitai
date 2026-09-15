@@ -88,6 +88,32 @@ impl Suppressions {
         now_suppressed
     }
 
+    /// Set suppression for several fingerprints at once (one secret seen in
+    /// many places) and persist once. Returns the number of entries changed.
+    pub fn set_all<'a>(
+        &mut self,
+        fingerprints: impl IntoIterator<Item = &'a str>,
+        suppressed: bool,
+    ) -> usize {
+        let mut changed = 0;
+        for fp in fingerprints {
+            let did = if suppressed {
+                self.fingerprints.insert(fp.to_owned())
+            } else {
+                self.fingerprints.remove(fp)
+            };
+            if did {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            if let Err(e) = self.save() {
+                tracing::warn!("suppressions save failed: {e}");
+            }
+        }
+        changed
+    }
+
     pub fn is_suppressed(&self, fingerprint_hex: &str) -> bool {
         self.fingerprints.contains(fingerprint_hex)
     }

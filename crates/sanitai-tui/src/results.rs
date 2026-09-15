@@ -10,9 +10,42 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::Widget,
 };
-use sanitai_core::finding::{Confidence, ContextClass};
+use sanitai_core::finding::{Confidence, ContextClass, FindingGroup};
 use sanitai_core::turn::Role;
 use std::path::Path;
+
+/// The rows the Results table shows, in display order: filtered, grouped by
+/// secret (unless the filter asks for every occurrence), High → Medium → Low.
+///
+/// This is the single source of truth for "what is row N" — the renderer
+/// and the key handlers in `app.rs` (suppress / open / copy) both go through
+/// it, so the cursor always acts on the row the user sees.
+pub fn visible_groups<'a>(
+    summary: &'a ScanSummary,
+    filter: Option<&ResultsFilter>,
+) -> Vec<FindingGroup<'a>> {
+    let filtered = summary
+        .findings
+        .iter()
+        .filter(|f| filter.map(|fl| fl.matches(f)).unwrap_or(true));
+    let mut groups: Vec<FindingGroup<'a>> =
+        if filter.map(|fl| fl.show_every_occurrence).unwrap_or(false) {
+            filtered
+                .map(|f| FindingGroup {
+                    representative: f,
+                    occurrences: vec![f],
+                })
+                .collect()
+        } else {
+            sanitai_core::finding::group_by_secret(filtered)
+        };
+    groups.sort_by_key(|g| match g.confidence() {
+        Confidence::High => 0u8,
+        Confidence::Medium => 1,
+        Confidence::Low => 2,
+    });
+    groups
+}
 
 // Pale yellow for LOW severity — one step softer than amber.
 const COLOR_LOW: Color = Color::Indexed(228);
@@ -41,42 +74,34 @@ impl Widget for &ResultsWidget<'_> {
         // Fill background.
         buf.set_style(area, Style::default().bg(COLOR_BG).fg(COLOR_FG));
 
-        // Build sorted findings view: High first, then Medium, then Low.
-        // Within the same confidence level, preserve original order (stable sort).
-        // Apply filter (if any) before sorting so counts reflect what's visible.
-        let mut sorted: Vec<&sanitai_core::finding::Finding> = if let Some(f) = self.filter {
-            self.summary
-                .findings
-                .iter()
-                .filter(|finding| f.matches(finding))
-                .collect()
-        } else {
-            self.summary.findings.iter().collect()
-        };
-        sorted.sort_by_key(|f| match f.confidence {
-            Confidence::High => 0u8,
-            Confidence::Medium => 1,
-            Confidence::Low => 2,
-        });
+        // Rows: filtered, grouped by secret, High → Medium → Low. See
+        // `visible_groups` — the same list the key handlers act on.
+        let sorted = visible_groups(self.summary, self.filter);
 
-        // Compute per-severity counts from the *filtered* view so the summary
-        // bar and table stay consistent.
+        // Per-severity counts of *rows* (distinct secrets when grouping),
+        // plus the raw occurrence total, from the filtered view so the
+        // summary bar and table stay consistent.
         let findings_high = sorted
             .iter()
-            .filter(|f| matches!(f.confidence, Confidence::High))
+            .filter(|g| matches!(g.confidence(), Confidence::High))
             .count();
         let findings_medium = sorted
             .iter()
-            .filter(|f| matches!(f.confidence, Confidence::Medium))
+            .filter(|g| matches!(g.confidence(), Confidence::Medium))
             .count();
         let findings_low = sorted
             .iter()
-            .filter(|f| matches!(f.confidence, Confidence::Low))
+            .filter(|g| matches!(g.confidence(), Confidence::Low))
             .count();
         let total = findings_high + findings_medium + findings_low;
+        let occurrences: usize = sorted.iter().map(|g| g.count()).sum();
         let filter_active = self
             .filter
             .map(|f| !f.show_all_context || f.min_confidence.is_some())
+            .unwrap_or(false);
+        let grouped = !self
+            .filter
+            .map(|f| f.show_every_occurrence)
             .unwrap_or(false);
 
         // --- Layout: summary bar (1) | body (fill) | keybinds bar (1) ---
@@ -98,6 +123,8 @@ impl Widget for &ResultsWidget<'_> {
             buf,
             self.summary,
             total,
+            occurrences,
+            grouped,
             findings_high,
             findings_medium,
             findings_low,
@@ -125,12 +152,11 @@ impl Widget for &ResultsWidget<'_> {
                 height: pane_height,
             };
             render_findings_table(table_area, buf, &sorted, self.scroll, self.suppressions);
-            let selected = sorted.get(self.scroll).copied();
-            if let Some(finding) = selected {
+            if let Some(group) = sorted.get(self.scroll) {
                 render_detail_pane(
                     detail_area,
                     buf,
-                    finding,
+                    group,
                     self.suppressions,
                     self.reveal_secrets,
                 );
@@ -138,7 +164,7 @@ impl Widget for &ResultsWidget<'_> {
         } else {
             render_findings_table(body_area, buf, &sorted, self.scroll, self.suppressions);
         }
-        render_keybinds_bar(keybinds_area, buf, self.detail_open);
+        render_keybinds_bar(keybinds_area, buf, self.detail_open, grouped);
     }
 }
 
@@ -149,6 +175,8 @@ fn render_summary_bar(
     buf: &mut Buffer,
     summary: &ScanSummary,
     total: usize,
+    occurrences: usize,
+    grouped: bool,
     findings_high: usize,
     findings_medium: usize,
     findings_low: usize,
@@ -193,7 +221,18 @@ fn render_summary_bar(
         }};
     }
 
-    let prefix = format!("  {} findings:  ", total);
+    // Grouped: "12 secrets (158 places):" — the number that matters is how
+    // many distinct things leaked, not how many times a file was re-read.
+    let prefix = if grouped && occurrences != total {
+        format!(
+            "  {} secret{} ({} places):  ",
+            total,
+            if total == 1 { "" } else { "s" },
+            occurrences
+        )
+    } else {
+        format!("  {} findings:  ", total)
+    };
     put!(&prefix, Style::default().fg(COLOR_FG));
 
     if findings_high > 0 {
@@ -228,7 +267,7 @@ fn render_summary_bar(
 fn render_findings_table(
     area: Rect,
     buf: &mut Buffer,
-    findings: &[&sanitai_core::finding::Finding],
+    findings: &[FindingGroup<'_>],
     selected: usize,
     suppressions: &Suppressions,
 ) {
@@ -249,11 +288,11 @@ fn render_findings_table(
     let cursor = selected.min(max_idx);
     let offset = cursor.saturating_sub(visible_rows.saturating_sub(1));
 
-    for (row_idx, finding) in findings.iter().skip(offset).take(visible_rows).enumerate() {
+    for (row_idx, group) in findings.iter().skip(offset).take(visible_rows).enumerate() {
         let absolute_idx = offset + row_idx;
         let is_selected = absolute_idx == cursor;
         let y = area.top() + row_idx as u16;
-        render_finding_row(area, buf, finding, y, is_selected, suppressions);
+        render_finding_row(area, buf, group, y, is_selected, suppressions);
     }
 }
 
@@ -261,8 +300,11 @@ fn render_findings_table(
 ///
 /// Column layout (space-separated):
 ///   [prefix 2] [severity 6] [space] [role 4] [space] [fingerprint 10]
-///     [space] [ctx 11] [space] [detector 28] [space] [filename 24]
+///     [space] [count 5] [ctx 11] [space] [detector 28] [space] [filename 24]
 ///     [space] [location] [space] [optional [suppressed] tag]
+///
+/// `count` is `×N` when the row stands for a secret seen N > 1 times
+/// (blank otherwise); the rest of the row describes the first occurrence.
 ///
 /// `location` is `Lnnn` when the parser attached a line number to the
 /// finding, else `msg N` where N is the 0-based message index inside the
@@ -271,11 +313,12 @@ fn render_findings_table(
 fn render_finding_row(
     area: Rect,
     buf: &mut Buffer,
-    finding: &sanitai_core::finding::Finding,
+    group: &FindingGroup<'_>,
     y: u16,
     is_selected: bool,
     suppressions: &Suppressions,
 ) {
+    let finding = group.representative;
     let mut x = area.left();
     let right = area.right();
 
@@ -347,6 +390,14 @@ fn render_finding_row(
     put!(&fp, base_style);
     put!(" ", base_style);
 
+    // Occurrence count — 5 chars ("\u{d7}47  "), blank for a single sighting.
+    let count = if group.count() > 1 {
+        fixed_width(&format!("\u{d7}{}", group.count()), 5)
+    } else {
+        fixed_width("", 5)
+    };
+    put!(&count, Style::default().fg(COLOR_FOCUS));
+
     // Context class — 11 chars wide ("DocQuote   ", "Educational", etc).
     let (ctx_text, ctx_style) =
         context_class_label(&finding.context_class, base_style, dimmed, suppressed);
@@ -413,10 +464,11 @@ fn render_finding_row(
 fn render_detail_pane(
     area: Rect,
     buf: &mut Buffer,
-    finding: &sanitai_core::finding::Finding,
+    group: &FindingGroup<'_>,
     suppressions: &Suppressions,
     reveal_secrets: bool,
 ) {
+    let finding = group.representative;
     if area.height == 0 {
         return;
     }
@@ -515,10 +567,44 @@ fn render_detail_pane(
         "[hidden \u{2014} toggle 'Reveal secret values' in Settings]".to_owned()
     };
 
+    // Seen: every place this same secret occurs, so the user can judge
+    // blast radius without scrolling through N identical rows.
+    let seen_field = {
+        let files = group.file_count();
+        let mut others: Vec<String> = group
+            .occurrences
+            .iter()
+            .skip(1)
+            .take(4)
+            .map(|f| {
+                let name = Path::new(f.turn_id.0.as_ref())
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("?");
+                format!("{name}:{}", location_label(f))
+            })
+            .collect();
+        if group.count() > 5 {
+            others.push(format!("+{} more", group.count() - 5));
+        }
+        let tail = if others.is_empty() {
+            String::new()
+        } else {
+            format!("  \u{2014}  {}", others.join(", "))
+        };
+        format!(
+            "\u{d7}{} in {} file{}{tail}",
+            group.count(),
+            files,
+            if files == 1 { "" } else { "s" }
+        )
+    };
+
     let lines: Vec<(&str, String)> = vec![
         ("Detector", detector_field),
         ("File", finding.turn_id.0.display().to_string()),
         ("Location", location_field),
+        ("Seen", seen_field),
         ("Match", match_field),
         ("Excerpt", excerpt_field),
         ("Role", role_text.to_owned()),
@@ -566,12 +652,13 @@ fn render_detail_pane(
 }
 
 /// Render the single-line keybinds bar.
-fn render_keybinds_bar(area: Rect, buf: &mut Buffer, detail_open: bool) {
+fn render_keybinds_bar(area: Rect, buf: &mut Buffer, detail_open: bool, grouped: bool) {
     buf.set_style(area, Style::default().bg(COLOR_BG));
-    let hints = if detail_open {
-        "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  q back"
-    } else {
-        "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  q back"
+    let hints = match (detail_open, grouped) {
+        (true, true) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g ungroup  \u{00b7}  q back",
+        (true, false) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g group  \u{00b7}  q back",
+        (false, true) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g ungroup  \u{00b7}  q back",
+        (false, false) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g group  \u{00b7}  q back",
     };
     buf.set_string(
         area.left(),

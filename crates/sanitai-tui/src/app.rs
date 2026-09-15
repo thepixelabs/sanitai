@@ -80,6 +80,9 @@ pub struct ResultsFilter {
     pub show_all_context: bool,
     /// Minimum confidence to show. None = show all.
     pub min_confidence: Option<sanitai_core::finding::Confidence>,
+    /// When false (default) rows are one-per-distinct-secret with a `×N`
+    /// occurrence count; when true every occurrence gets its own row.
+    pub show_every_occurrence: bool,
 }
 
 impl ResultsFilter {
@@ -583,7 +586,11 @@ impl App {
                         let max = self
                             .last_scan
                             .as_ref()
-                            .map(|s| s.findings.len().saturating_sub(1))
+                            .map(|s| {
+                                crate::results::visible_groups(s, Some(&self.filter))
+                                    .len()
+                                    .saturating_sub(1)
+                            })
                             .unwrap_or(0);
                         self.results_scroll = (self.results_scroll + 1).min(max);
                     }
@@ -608,6 +615,11 @@ impl App {
                         self.results_scroll = 0;
                     }
                     KeyCode::Char('f') => self.toggle_selected_suppression(),
+                    KeyCode::Char('g') => {
+                        // Toggle one-row-per-secret vs one-row-per-occurrence.
+                        self.filter.show_every_occurrence = !self.filter.show_every_occurrence;
+                        self.results_scroll = 0;
+                    }
                     KeyCode::Char('o') => self.open_selected_in_editor(),
                     KeyCode::Char('c') => self.copy_selected_fingerprint(),
                     KeyCode::Char('R') => self.begin_results_redact_prompt(),
@@ -720,17 +732,25 @@ impl App {
     /// `turn_id.0` is an `Arc`, the matched_raw is the only allocation).
     fn selected_finding(&self) -> Option<sanitai_core::finding::Finding> {
         let summary = self.last_scan.as_ref()?;
-        let mut sorted: Vec<&sanitai_core::finding::Finding> = summary
-            .findings
-            .iter()
-            .filter(|f| self.filter.matches(f))
-            .collect();
-        sorted.sort_by_key(|f| match f.confidence {
-            Confidence::High => 0u8,
-            Confidence::Medium => 1,
-            Confidence::Low => 2,
-        });
-        sorted.get(self.results_scroll).map(|f| (*f).clone())
+        let groups = crate::results::visible_groups(summary, Some(&self.filter));
+        groups
+            .get(self.results_scroll)
+            .map(|g| g.representative.clone())
+    }
+
+    /// Fingerprints of every occurrence behind the selected row — one entry
+    /// when rows are ungrouped, N when the row stands for a secret seen N
+    /// times. Suppression acts on all of them so the secret disappears from
+    /// the ungrouped view too.
+    fn selected_fingerprints(&self) -> Vec<String> {
+        let Some(summary) = self.last_scan.as_ref() else {
+            return Vec::new();
+        };
+        let groups = crate::results::visible_groups(summary, Some(&self.filter));
+        groups
+            .get(self.results_scroll)
+            .map(|g| g.occurrences.iter().map(|f| f.fingerprint_hex()).collect())
+            .unwrap_or_default()
     }
 
     fn toggle_selected_suppression(&mut self) {
@@ -739,9 +759,22 @@ impl App {
             return;
         };
         let fp = finding.fingerprint_hex();
-        let now_suppressed = self.suppressions.toggle(&fp);
+        let all = self.selected_fingerprints();
+        let now_suppressed = if all.len() > 1 {
+            let target = !self.suppressions.is_suppressed(&fp);
+            self.suppressions
+                .set_all(all.iter().map(String::as_str), target);
+            target
+        } else {
+            self.suppressions.toggle(&fp)
+        };
+        let places = if all.len() > 1 {
+            format!(" ({} places)", all.len())
+        } else {
+            String::new()
+        };
         self.current_tagline = if now_suppressed {
-            format!("Suppressed [{fp}].")
+            format!("Suppressed [{fp}]{places}.")
         } else {
             format!("Un-suppressed [{fp}].")
         };
@@ -1759,6 +1792,7 @@ mod filter_tests {
         let filter = ResultsFilter {
             show_all_context: true,
             min_confidence: Some(Confidence::Medium),
+            show_every_occurrence: false,
         };
         assert!(
             !filter.matches(&f),
@@ -1768,11 +1802,65 @@ mod filter_tests {
         let filter2 = ResultsFilter {
             show_all_context: true,
             min_confidence: Some(Confidence::Low),
+            show_every_occurrence: false,
         };
         assert!(
             filter2.matches(&f),
             "Low confidence should be visible when min is Low"
         );
+    }
+
+    /// One secret echoed across three turns and two files is one row when
+    /// grouped (with the occurrence count), three rows when ungrouped.
+    #[test]
+    fn results_groups_repeated_secret_into_one_row() {
+        let mk = |file: &str, turn: usize, raw: &str| {
+            let path = std::path::PathBuf::from(file);
+            let fingerprint = sanitai_core::finding::compute_fingerprint(
+                raw.as_bytes(),
+                "postgres_url",
+                &path,
+                turn,
+            );
+            let mut f = sample_finding();
+            f.turn_id = (std::sync::Arc::new(path), turn);
+            f.detector_id = "postgres_url";
+            f.matched_raw = raw.to_owned();
+            f.fingerprint = fingerprint;
+            f
+        };
+        let summary = crate::scan_runner::ScanSummary {
+            scan_id: "t".to_owned(),
+            started_at_ns: 0,
+            total_files: 2,
+            total_turns: 3,
+            findings_high: 4,
+            findings_medium: 0,
+            findings_low: 0,
+            duration_ms: 0,
+            paths: vec![],
+            findings: vec![
+                mk("/a.jsonl", 1, "postgres://u:p@h/db"),
+                mk("/a.jsonl", 2, "postgres://u:p@h/db"),
+                mk("/b.jsonl", 3, "postgres://u:p@h/db"),
+                mk("/b.jsonl", 4, "postgres://other:pw@h/db"),
+            ],
+            cancelled: false,
+        };
+        let grouped = ResultsFilter::default();
+        let rows = crate::results::visible_groups(&summary, Some(&grouped));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].count(), 3);
+        assert_eq!(rows[0].file_count(), 2);
+        assert_eq!(rows[1].count(), 1);
+
+        let flat = ResultsFilter {
+            show_every_occurrence: true,
+            ..ResultsFilter::default()
+        };
+        let rows = crate::results::visible_groups(&summary, Some(&flat));
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|g| g.count() == 1));
     }
 }
 
@@ -1994,6 +2082,165 @@ mod results_redact_tests {
         assert!(app.results_redact_prompt.is_some());
         assert_eq!(app.results_scroll, scroll_before);
         assert!(!app.filter.show_all_context);
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    //! Headless tests for the grouped Results view: `g` toggles one row
+    //! per secret / per occurrence, `j`/`k` are bounded by the visible
+    //! rows, and `f` on a grouped row suppresses every occurrence.
+    use super::*;
+    use crossterm::event::KeyCode;
+    use sanitai_core::finding::{Confidence, ContextClass, Finding, SpanKind, TransformChain};
+    use sanitai_core::traits::Category;
+    use std::sync::Arc;
+
+    fn mk(file: &str, turn: usize, raw: &str, conf: Confidence) -> Finding {
+        let path = std::path::PathBuf::from(file);
+        let fingerprint =
+            sanitai_core::finding::compute_fingerprint(raw.as_bytes(), "postgres_url", &path, turn);
+        Finding {
+            turn_id: (Arc::new(path), turn),
+            detector_id: "postgres_url",
+            byte_range: 0..raw.len(),
+            matched_raw: raw.to_owned(),
+            transform: TransformChain::default(),
+            confidence: conf,
+            span_kind: SpanKind::Single,
+            synthetic: false,
+            role: None,
+            category: Category::Credential,
+            entropy_score: 4.0,
+            context_class: ContextClass::RealPaste,
+            fingerprint,
+            line_in_file: Some(turn as u32 + 1),
+            excerpt: String::new(),
+        }
+    }
+
+    /// Three sightings of one secret (two files) plus one distinct secret:
+    /// 2 grouped rows, 4 ungrouped rows.
+    fn app_with_grouped_results() -> App {
+        let settings = AppSettings::default();
+        let settings_screen = SettingsScreen::new(settings.clone());
+        let summary = ScanSummary {
+            scan_id: "grp".to_owned(),
+            started_at_ns: 0,
+            total_files: 2,
+            total_turns: 4,
+            findings_high: 3,
+            findings_medium: 1,
+            findings_low: 0,
+            duration_ms: 1,
+            paths: vec![],
+            findings: vec![
+                mk("/a.jsonl", 0, "postgres://u:p@h/db", Confidence::High),
+                mk("/a.jsonl", 1, "postgres://u:p@h/db", Confidence::High),
+                mk("/b.jsonl", 2, "postgres://u:p@h/db", Confidence::High),
+                mk("/b.jsonl", 3, "postgres://o:x@h/db", Confidence::Medium),
+            ],
+            cancelled: false,
+        };
+        App {
+            menu: Menu::new(),
+            state: AppState::Results,
+            current_tagline: String::new(),
+            banner: Banner::new(),
+            last_scan: Some(summary),
+            last_scan_label: None,
+            should_quit: false,
+            results_scroll: 0,
+            results_detail_open: false,
+            results_redact_prompt: None,
+            history_screen: None,
+            settings_screen,
+            redact_screen: None,
+            scan_progress: None,
+            show_help: false,
+            app_settings: settings,
+            filter: ResultsFilter::default(),
+            suppressions: Suppressions::default(),
+        }
+    }
+
+    #[test]
+    fn j_is_bounded_by_visible_rows_and_g_resets_cursor() {
+        let mut app = app_with_grouped_results();
+        for _ in 0..10 {
+            app.handle_key(KeyCode::Char('j'));
+        }
+        assert_eq!(app.results_scroll, 1, "grouped view has 2 rows");
+        let last = app.selected_finding().expect("last grouped row selects");
+        assert_eq!(last.matched_raw, "postgres://o:x@h/db");
+        // Enter on the last row opens detail; the selection is unchanged.
+        app.handle_key(KeyCode::Enter);
+        assert!(app.results_detail_open);
+        assert_eq!(
+            app.selected_finding().unwrap().matched_raw,
+            "postgres://o:x@h/db"
+        );
+
+        app.handle_key(KeyCode::Char('g'));
+        assert!(app.filter.show_every_occurrence);
+        assert_eq!(app.results_scroll, 0, "g resets the cursor");
+        for _ in 0..10 {
+            app.handle_key(KeyCode::Char('j'));
+        }
+        assert_eq!(app.results_scroll, 3, "ungrouped view has 4 rows");
+        assert!(app.selected_finding().is_some());
+
+        // Back to grouped: cursor 3 would be out of range, so it resets.
+        app.handle_key(KeyCode::Char('g'));
+        assert!(!app.filter.show_every_occurrence);
+        assert_eq!(app.results_scroll, 0);
+        assert!(app.selected_finding().is_some());
+    }
+
+    #[test]
+    fn f_on_grouped_row_suppresses_every_occurrence() {
+        let mut app = app_with_grouped_results();
+        let fps: Vec<String> = app.last_scan.as_ref().unwrap().findings[..3]
+            .iter()
+            .map(|f| f.fingerprint_hex())
+            .collect();
+        let other = app.last_scan.as_ref().unwrap().findings[3].fingerprint_hex();
+
+        app.handle_key(KeyCode::Char('f'));
+        for fp in &fps {
+            assert!(
+                app.suppressions.is_suppressed(fp),
+                "{fp} must be suppressed"
+            );
+        }
+        assert!(!app.suppressions.is_suppressed(&other));
+        assert!(
+            app.current_tagline.contains("(3 places)"),
+            "tagline must report the occurrence count; got: {}",
+            app.current_tagline
+        );
+
+        // Ungrouped, all three rows are struck through, the fourth is not.
+        app.handle_key(KeyCode::Char('g'));
+        let summary = app.last_scan.as_ref().unwrap();
+        let rows = crate::results::visible_groups(summary, Some(&app.filter));
+        assert_eq!(rows.len(), 4);
+        let struck: Vec<bool> = rows
+            .iter()
+            .map(|g| {
+                app.suppressions
+                    .is_suppressed(&g.representative.fingerprint_hex())
+            })
+            .collect();
+        assert_eq!(struck, vec![true, true, true, false]);
+
+        // `f` again on the grouped row un-suppresses all of them.
+        app.handle_key(KeyCode::Char('g'));
+        app.handle_key(KeyCode::Char('f'));
+        for fp in &fps {
+            assert!(!app.suppressions.is_suppressed(fp));
+        }
+        assert!(app.current_tagline.starts_with("Un-suppressed"));
     }
 }
 
@@ -2226,5 +2473,86 @@ mod history_reload_tests {
         // The mode used here is irrelevant — the refusal happens before
         // the redactor is consulted. We just verify state is unchanged.
         let _ = RedactMode::Mask;
+    }
+
+    /// Historical findings never carry `matched_raw`, so the grouped
+    /// Results view must not fold every row from one detector into a
+    /// single `×N` group (which would also make `f` suppress all of them).
+    #[test]
+    fn history_reload_keeps_same_detector_findings_as_separate_rows() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let store = Store::open_at(f.path()).unwrap();
+        let scan_id = "01HISTORY_GROUPED".to_owned();
+        store
+            .begin_scan(&BeginScanRecord {
+                scan_id: scan_id.clone(),
+                started_at_ns: 1_700_000_000_000_000_000,
+                project_name: Some("hist-group".to_owned()),
+                claude_account: None,
+                total_files: 1,
+                format: "tui".to_owned(),
+            })
+            .unwrap();
+        let mk = |turn: i64, fp: &str| FindingRecord {
+            scan_id: scan_id.clone(),
+            detector_id: "generic_password_assignment".to_owned(),
+            file_path: "/tmp/hist-group.jsonl".to_owned(),
+            turn_idx: turn,
+            confidence: "medium".to_owned(),
+            transforms: "[]".to_owned(),
+            synthetic: false,
+            role: Some("user".to_owned()),
+            category: Some("secret".to_owned()),
+            entropy_score: Some(4.5),
+            context_class: Some("real_paste".to_owned()),
+            secret_hash: None,
+            line_in_file: Some(turn + 1),
+            fingerprint: Some(fp.to_owned()),
+            byte_start: Some(0),
+            byte_end: Some(0),
+            excerpt: None,
+        };
+        store
+            .commit_file(
+                &scan_id,
+                "/tmp/hist-group.jsonl",
+                &[mk(0, "aaaa0001"), mk(1, "aaaa0002"), mk(2, "aaaa0003")],
+            )
+            .unwrap();
+        store
+            .finalize_scan(
+                &scan_id,
+                &FinalizeScanInput {
+                    duration_ms: 1,
+                    total_turns: 3,
+                    exit_code: 1,
+                    cancelled: false,
+                },
+            )
+            .unwrap();
+        let record = store.recent_scans(1).unwrap().into_iter().next().unwrap();
+
+        let mut app = app_with_history(vec![record.clone()]);
+        app.load_history_scan_from_store(&store, record);
+        let summary = app.last_scan.as_ref().unwrap();
+        assert_eq!(summary.findings.len(), 3);
+        let rows = crate::results::visible_groups(summary, Some(&app.filter));
+        assert_eq!(
+            rows.len(),
+            3,
+            "three historical findings from one detector must stay three rows"
+        );
+        assert!(rows.iter().all(|g| g.count() == 1));
+
+        // And `f` on the first row suppresses exactly that one fingerprint.
+        app.handle_key(KeyCode::Char('f'));
+        assert!(app.suppressions.is_suppressed("aaaa0001"));
+        assert!(!app.suppressions.is_suppressed("aaaa0002"));
+        assert!(!app.suppressions.is_suppressed("aaaa0003"));
+        assert!(
+            !app.current_tagline.contains("places"),
+            "single-occurrence row must not claim N places; got: {}",
+            app.current_tagline
+        );
     }
 }

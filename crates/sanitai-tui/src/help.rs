@@ -160,6 +160,10 @@ fn content_rows() -> Vec<Row> {
             desc: "Redact selected file (inline y/n prompt)",
         },
         Row {
+            key: Some("g"),
+            desc: "Toggle one row per secret / per occurrence",
+        },
+        Row {
             key: Some("Tab"),
             desc: "Toggle Educational/DocQuote",
         },
