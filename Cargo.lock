@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "context-eval"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "sanitai-core",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "corpus-gen"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "differential"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-cli"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-core"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "dirs-next",
  "figment",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-detectors"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "aho-corasick",
  "base64",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-fixtures"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "rand 0.8.8",
  "sanitai-core",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-parsers"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "dirs-next",
  "futures",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-redactor"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "getrandom 0.2.17",
  "hmac",
@@ -1580,7 +1580,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-sandbox"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "libc",
  "sanitai-core",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-store"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "dirs-next",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "sanitai-tui"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "arboard",

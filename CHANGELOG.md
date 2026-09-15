@@ -5,6 +5,14 @@ entries are generated from conventional commit subjects on each release.
 
 <!-- version list -->
 
+## v0.4.3 (2026-09-15)
+
+### Bug Fixes
+
+- **scanner**: Hide vendor test values, mask matches, explain findings
+  ([`daa8aa7`](https://github.com/thepixelabs/sanitai/commit/daa8aa7f51fc56149abdf14ac73d69728439293b))
+
+
 ## v0.4.2 (2026-09-15)
 
 ### Bug Fixes
