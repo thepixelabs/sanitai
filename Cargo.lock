@@ -1507,6 +1507,7 @@ dependencies = [
  "dirs-next",
  "figment",
  "futures",
+ "glob",
  "libc",
  "proptest",
  "schemars",
@@ -1516,6 +1517,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "toml",
+ "toml_edit",
  "tracing",
  "zeroize",
 ]

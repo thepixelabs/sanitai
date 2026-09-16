@@ -15,6 +15,8 @@ figment    = { workspace = true }
 schemars   = { workspace = true }
 futures    = { workspace = true }
 toml       = { workspace = true }
+toml_edit  = "0.22"
+glob       = { workspace = true }
 libc       = "0.2"
 dirs-next  = { workspace = true }
 sha2       = { workspace = true }

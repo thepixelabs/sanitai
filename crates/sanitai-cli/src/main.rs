@@ -98,6 +98,12 @@ struct ScanArgs {
     #[arg(value_name = "PATH")]
     path: Vec<PathBuf>,
 
+    /// Skip files whose path matches this glob (repeatable). `*` crosses `/`;
+    /// a pattern without wildcards is a substring test. Adds to
+    /// `policy.ignore_patterns` from the config file for this run only.
+    #[arg(long = "ignore", value_name = "GLOB")]
+    ignore: Vec<String>,
+
     /// Output format
     #[arg(short, long, value_enum, default_value = "human")]
     format: OutputFormat,
@@ -400,8 +406,19 @@ fn run_scan(args: ScanArgs, config_path: Option<&std::path::Path>) -> i32 {
         out
     };
 
-    let (stdin_paths, file_paths): (Vec<PathBuf>, Vec<PathBuf>) =
+    let (stdin_paths, mut file_paths): (Vec<PathBuf>, Vec<PathBuf>) =
         raw_paths.into_iter().partition(|p| p.as_os_str() == "-");
+
+    // Ignore patterns: config file plus any `--ignore` flags for this run.
+    let ignore = {
+        let mut patterns = cfg.policy.ignore_patterns.clone();
+        patterns.extend(args.ignore.iter().cloned());
+        sanitai_core::config::IgnoreMatcher::new(&patterns)
+    };
+    let ignored_files = ignore.retain_allowed(&mut file_paths);
+    if ignored_files > 0 && matches!(args.format, OutputFormat::Human) {
+        eprintln!("sanitai: {ignored_files} file(s) skipped by ignore patterns.");
+    }
 
     // Build detectors once. RegexDetector::new() is cheap (sets a &'static pointer).
     // `regex_arc` is shared between the TransformDetector and the CrossTurnCorrelator.
@@ -1211,7 +1228,22 @@ fn run_discover(args: DiscoverArgs) -> i32 {
         return 0;
     }
 
-    println!("Found {} conversation source(s):", sources.len());
+    let ignore = load_cli_config(None)
+        .map(|c| c.policy.ignore_matcher())
+        .unwrap_or_default();
+    let ignored = sources
+        .iter()
+        .filter(|s| ignore.is_ignored(&s.path))
+        .count();
+    if ignored > 0 {
+        println!(
+            "Found {} conversation source(s), {} of them skipped by ignore patterns:",
+            sources.len(),
+            ignored
+        );
+    } else {
+        println!("Found {} conversation source(s):", sources.len());
+    }
     for src in &sources {
         let display = if args.absolute {
             src.path.display().to_string()
@@ -1221,7 +1253,12 @@ fn run_discover(args: DiscoverArgs) -> i32 {
                 Err(_) => src.path.display().to_string(),
             }
         };
-        println!("  [{:?}] {}", src.kind, display);
+        let mark = if ignore.is_ignored(&src.path) {
+            "  (ignored)"
+        } else {
+            ""
+        };
+        println!("  [{:?}] {}{}", src.kind, display, mark);
     }
     println!("\nUse `sanitai scan <path>` to scan a specific source.");
     0

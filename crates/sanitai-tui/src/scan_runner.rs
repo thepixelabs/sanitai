@@ -10,6 +10,7 @@ use crossbeam_channel::Sender;
 use sanitai_core::{
     chunk::{ChunkerConfig, DetectorScratch},
     chunker::chunk_turn,
+    config::IgnoreMatcher,
     finding::{Confidence, Finding},
     traits::{ConversationParser, Detector, Sniff, SourceHint},
     turn::Turn,
@@ -37,6 +38,8 @@ pub struct ScanSummary {
     pub findings: Vec<Finding>,
     /// True if the user cancelled the scan before it completed.
     pub cancelled: bool,
+    /// Files discovered but skipped by `policy.ignore_patterns`.
+    pub ignored_files: usize,
 }
 
 /// Events sent from the worker thread back to the UI thread during a scan.
@@ -77,7 +80,11 @@ pub enum ScanProgressEvent {
 ///
 /// Designed to be called from a worker thread spawned by the TUI. The caller
 /// owns the receiver and drains it on each render tick.
-pub fn run_auto_scan_progress(tx: Sender<ScanProgressEvent>, cancel: Arc<AtomicBool>) {
+pub fn run_auto_scan_progress(
+    tx: Sender<ScanProgressEvent>,
+    cancel: Arc<AtomicBool>,
+    ignore: IgnoreMatcher,
+) {
     let start = Instant::now();
     let scan_id = ulid::Ulid::new().to_string();
     let started_at_ns = SystemTime::now()
@@ -93,7 +100,10 @@ pub fn run_auto_scan_progress(tx: Sender<ScanProgressEvent>, cancel: Arc<AtomicB
 
     let home = dirs_next::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let discovered = discover_all(&home);
-    let paths: Vec<PathBuf> = discovered.into_iter().map(|d| d.path).collect();
+    let mut paths: Vec<PathBuf> = discovered.into_iter().map(|d| d.path).collect();
+    // `policy.ignore_patterns` from the config file (plus anything added via
+    // `i` in Results or the Settings → Ignore tab this session).
+    let ignored_files = ignore.retain_allowed(&mut paths);
 
     // Compute total bytes upfront so the gauge has an honest denominator.
     // Files whose metadata fails get size 0 and won't break the total — they
@@ -195,6 +205,7 @@ pub fn run_auto_scan_progress(tx: Sender<ScanProgressEvent>, cancel: Arc<AtomicB
         paths,
         findings: all_findings,
         cancelled,
+        ignored_files,
     };
 
     let _ = tx.send(ScanProgressEvent::Done(Box::new(summary)));

@@ -256,9 +256,14 @@ fn render_summary_bar(
     }
 
     let filter_note = if filter_active { "  (filtered)" } else { "" };
+    let ignored_note = if summary.ignored_files > 0 {
+        format!("  \u{00b7}  {} ignored", summary.ignored_files)
+    } else {
+        String::new()
+    };
     let suffix = format!(
-        "\u{00b7}  {} files  \u{00b7}  {}ms{}",
-        summary.total_files, summary.duration_ms, filter_note
+        "\u{00b7}  {} files{}  \u{00b7}  {}ms{}",
+        summary.total_files, ignored_note, summary.duration_ms, filter_note
     );
     put!(&suffix, Style::default().fg(COLOR_FG));
 }
@@ -660,10 +665,10 @@ fn render_detail_pane(
 fn render_keybinds_bar(area: Rect, buf: &mut Buffer, detail_open: bool, grouped: bool) {
     buf.set_style(area, Style::default().bg(COLOR_BG));
     let hints = match (detail_open, grouped) {
-        (true, true) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g ungroup  \u{00b7}  q back",
-        (true, false) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g group  \u{00b7}  q back",
-        (false, true) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g ungroup  \u{00b7}  q back",
-        (false, false) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  g group  \u{00b7}  q back",
+        (true, true) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  i ignore  \u{00b7}  g ungroup  \u{00b7}  q back",
+        (true, false) => "  j/k scroll  \u{00b7}  Enter close  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  i ignore  \u{00b7}  g group  \u{00b7}  q back",
+        (false, true) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  i ignore  \u{00b7}  g ungroup  \u{00b7}  q back",
+        (false, false) => "  j/k scroll  \u{00b7}  Enter detail  \u{00b7}  f suppress  \u{00b7}  o open  \u{00b7}  c copy fp  \u{00b7}  i ignore  \u{00b7}  g group  \u{00b7}  q back",
     };
     buf.set_string(
         area.left(),

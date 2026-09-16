@@ -164,6 +164,10 @@ fn content_rows() -> Vec<Row> {
             desc: "Toggle one row per secret / per occurrence",
         },
         Row {
+            key: Some("i"),
+            desc: "Ignore this file or its project folder in future scans",
+        },
+        Row {
             key: Some("Tab"),
             desc: "Toggle Educational/DocQuote",
         },

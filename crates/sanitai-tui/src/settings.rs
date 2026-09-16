@@ -41,6 +41,7 @@ impl Default for AppSettings {
 pub enum SettingsTab {
     General,
     Rules,
+    Ignore,
 }
 
 // ---------------------------------------------------------------------------
@@ -56,31 +57,132 @@ pub struct SettingsScreen {
     pub settings: AppSettings,
     pub active_tab: SettingsTab,
     pub general_cursor: usize,
+    /// `policy.ignore_patterns` as currently persisted (mirrors the config
+    /// file; App keeps its own copy for the scan runner).
+    pub ignore_patterns: Vec<String>,
+    pub ignore_cursor: usize,
+    /// `Some` while the user is typing a new pattern on the Ignore tab.
+    pub ignore_input: Option<String>,
+    /// One-line status under the list ("saved to …", "invalid pattern …").
+    pub ignore_status: String,
 }
 
 impl SettingsScreen {
     pub fn new(settings: AppSettings) -> Self {
+        Self::with_ignore_patterns(settings, Vec::new())
+    }
+
+    pub fn with_ignore_patterns(settings: AppSettings, ignore_patterns: Vec<String>) -> Self {
         Self {
             settings,
             active_tab: SettingsTab::General,
             general_cursor: 0,
+            ignore_patterns,
+            ignore_cursor: 0,
+            ignore_input: None,
+            ignore_status: String::new(),
+        }
+    }
+
+    // ----- Ignore tab -----------------------------------------------------
+
+    pub fn is_typing(&self) -> bool {
+        self.ignore_input.is_some()
+    }
+
+    pub fn begin_ignore_input(&mut self) {
+        self.ignore_input = Some(String::new());
+        self.ignore_status =
+            "Type a glob or a path fragment, Enter to save, Esc to cancel".to_owned();
+    }
+
+    pub fn push_ignore_char(&mut self, c: char) {
+        if let Some(buf) = self.ignore_input.as_mut() {
+            buf.push(c);
+        }
+    }
+
+    pub fn pop_ignore_char(&mut self) {
+        if let Some(buf) = self.ignore_input.as_mut() {
+            buf.pop();
+        }
+    }
+
+    pub fn cancel_ignore_input(&mut self) {
+        self.ignore_input = None;
+        self.ignore_status.clear();
+    }
+
+    /// Persist the typed pattern. Returns the pattern when one was added so
+    /// the caller can update its own copy.
+    pub fn commit_ignore_input(&mut self) -> Option<String> {
+        let pattern = self.ignore_input.take()?.trim().to_owned();
+        if pattern.is_empty() {
+            self.ignore_status.clear();
+            return None;
+        }
+        match sanitai_core::config::add_ignore_pattern(&pattern) {
+            Ok((path, true)) => {
+                self.ignore_patterns.push(pattern.clone());
+                self.ignore_cursor = self.ignore_patterns.len().saturating_sub(1);
+                self.ignore_status = format!("Saved to {}", path.display());
+                Some(pattern)
+            }
+            Ok((_, false)) => {
+                self.ignore_status = "Already in the list".to_owned();
+                None
+            }
+            Err(e) => {
+                self.ignore_status = format!("Not saved: {e}");
+                None
+            }
+        }
+    }
+
+    /// Remove the selected pattern from the config. Returns it on success.
+    pub fn remove_selected_ignore(&mut self) -> Option<String> {
+        let pattern = self.ignore_patterns.get(self.ignore_cursor)?.clone();
+        match sanitai_core::config::remove_ignore_pattern(&pattern) {
+            Ok((path, _)) => {
+                self.ignore_patterns.remove(self.ignore_cursor);
+                if self.ignore_cursor >= self.ignore_patterns.len() {
+                    self.ignore_cursor = self.ignore_patterns.len().saturating_sub(1);
+                }
+                self.ignore_status = format!("Removed; saved to {}", path.display());
+                Some(pattern)
+            }
+            Err(e) => {
+                self.ignore_status = format!("Not removed: {e}");
+                None
+            }
         }
     }
 
     pub fn next_tab(&mut self) {
         self.active_tab = match self.active_tab {
             SettingsTab::General => SettingsTab::Rules,
-            SettingsTab::Rules => SettingsTab::General,
+            SettingsTab::Rules => SettingsTab::Ignore,
+            SettingsTab::Ignore => SettingsTab::General,
         };
     }
 
     pub fn move_down(&mut self) {
+        if self.active_tab == SettingsTab::Ignore {
+            if self.ignore_cursor + 1 < self.ignore_patterns.len() {
+                self.ignore_cursor += 1;
+            }
+            return;
+        }
         if self.active_tab == SettingsTab::General && GENERAL_ITEM_COUNT > 0 {
             self.general_cursor = (self.general_cursor + 1) % GENERAL_ITEM_COUNT;
         }
     }
 
     pub fn move_up(&mut self) {
+        if self.active_tab == SettingsTab::Ignore {
+            self.ignore_cursor = self.ignore_cursor.saturating_sub(1);
+            return;
+        }
         if self.active_tab == SettingsTab::General && GENERAL_ITEM_COUNT > 0 {
             self.general_cursor = if self.general_cursor == 0 {
                 GENERAL_ITEM_COUNT - 1
@@ -168,9 +270,18 @@ impl Widget for &mut SettingsScreen {
                 Style::default().fg(COLOR_MUTED)
             };
 
+            let ignore_style = if self.active_tab == SettingsTab::Ignore {
+                Style::default()
+                    .fg(COLOR_FOCUS)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(COLOR_MUTED)
+            };
+
             let x = area.left() + 2;
             buf.set_string(x, row, "[ General ]", general_style);
             buf.set_string(x + 13, row, "[ Rules ]", rules_style);
+            buf.set_string(x + 24, row, "[ Ignore ]", ignore_style);
             row += 1;
         }
 
@@ -191,14 +302,24 @@ impl Widget for &mut SettingsScreen {
             SettingsTab::Rules => {
                 render_rules(area.left(), row, content_bottom, buf);
             }
+            SettingsTab::Ignore => {
+                render_ignore(self, area, row, content_bottom, buf);
+            }
         }
 
         // Footer.
         if footer_row >= area.top() && footer_row < area.bottom() {
+            let hints = match (self.active_tab, self.is_typing()) {
+                (SettingsTab::Ignore, true) => "  Enter save  \u{00b7}  Esc cancel",
+                (SettingsTab::Ignore, false) => {
+                    "  Tab switch tabs  \u{00b7}  j/k navigate  \u{00b7}  a add  \u{00b7}  d delete  \u{00b7}  q back"
+                }
+                _ => "  Tab switch tabs  \u{00b7}  j/k navigate  \u{00b7}  Space toggle  \u{00b7}  q back",
+            };
             buf.set_string(
                 area.left(),
                 footer_row,
-                "  Tab switch tabs  \u{00b7}  j/k navigate  \u{00b7}  Space toggle  \u{00b7}  q back",
+                hints,
                 Style::default().fg(COLOR_MUTED),
             );
         }
@@ -305,6 +426,88 @@ fn render_rules(left: u16, top: u16, bottom: u16, buf: &mut Buffer) {
             break;
         }
         buf.set_string(left, row, line, Style::default().fg(COLOR_MUTED));
+    }
+}
+
+/// The Ignore tab: the persisted `policy.ignore_patterns`, a cursor, and an
+/// optional input line while adding.
+fn render_ignore(screen: &SettingsScreen, area: Rect, top: u16, bottom: u16, buf: &mut Buffer) {
+    let left = area.left();
+    let width = area.width as usize;
+    let mut row = top;
+    let put = |buf: &mut Buffer, row: u16, text: &str, style: Style| {
+        let clipped: String = text.chars().take(width).collect();
+        buf.set_string(left, row, clipped, style);
+    };
+    if row >= bottom {
+        return;
+    }
+    let config_path = sanitai_core::config::global_config_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(config path unavailable)".to_owned());
+    put(
+        buf,
+        row,
+        &format!("  Files matching these patterns are skipped. Stored in {config_path}"),
+        Style::default().fg(COLOR_MUTED),
+    );
+    row += 1;
+    if row < bottom {
+        put(
+            buf,
+            row,
+            "  `*` matches across `/`; a pattern without wildcards matches any path containing it.",
+            Style::default().fg(COLOR_MUTED),
+        );
+        row += 1;
+    }
+    if row < bottom {
+        row += 1; // spacer
+    }
+    if screen.ignore_patterns.is_empty() && screen.ignore_input.is_none() && row < bottom {
+        put(
+            buf,
+            row,
+            "  (no ignore patterns yet \u{2014} press a to add one, or i on a result)",
+            Style::default().fg(COLOR_MUTED),
+        );
+        row += 1;
+    }
+    for (idx, pattern) in screen.ignore_patterns.iter().enumerate() {
+        if row >= bottom {
+            break;
+        }
+        let selected = idx == screen.ignore_cursor && !screen.is_typing();
+        let prefix = if selected { " \u{25b8} " } else { "   " };
+        let style = if selected {
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(COLOR_FG)
+        };
+        put(buf, row, &format!("{prefix}{pattern}"), style);
+        row += 1;
+    }
+    if let Some(input) = &screen.ignore_input {
+        if row < bottom {
+            put(
+                buf,
+                row,
+                &format!(" + {input}\u{2588}"),
+                Style::default().fg(COLOR_WARN).add_modifier(Modifier::BOLD),
+            );
+            row += 1;
+        }
+    }
+    if !screen.ignore_status.is_empty() && row + 1 < bottom {
+        row += 1;
+        put(
+            buf,
+            row,
+            &format!("  {}", screen.ignore_status),
+            Style::default().fg(COLOR_SAFE),
+        );
     }
 }
 

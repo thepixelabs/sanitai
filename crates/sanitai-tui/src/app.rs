@@ -35,7 +35,7 @@ use crate::{
     redact_screen::{RedactPhase, RedactScreen},
     results::ResultsWidget,
     scan_runner::{run_auto_scan_progress, ScanProgressEvent, ScanSummary},
-    settings::{AppSettings, SettingsScreen},
+    settings::{AppSettings, SettingsScreen, SettingsTab},
     suppressions::Suppressions,
 };
 
@@ -70,6 +70,47 @@ enum AppState {
 pub(crate) struct ResultsRedactPrompt {
     pub file: PathBuf,
     pub finding_count: usize,
+}
+
+/// The `i` prompt: which scope to add to `policy.ignore_patterns`.
+#[derive(Debug, Clone)]
+pub(crate) struct ResultsIgnorePrompt {
+    pub file: PathBuf,
+    /// The "project" folder: the directory directly under
+    /// `~/.claude/projects` for Claude Code transcripts, else the parent.
+    pub folder: PathBuf,
+}
+
+/// `policy.ignore_patterns` from the merged config, or nothing if the config
+/// cannot be loaded — a broken config file must not stop the TUI.
+fn load_ignore_patterns() -> Vec<String> {
+    match sanitai_core::config::load_config() {
+        Ok(c) => c.policy.ignore_patterns,
+        Err(e) => {
+            tracing::warn!("config load failed, ignore patterns unavailable: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// The folder an `i` prompt offers to ignore for `file`.
+pub(crate) fn ignore_folder_for(file: &std::path::Path) -> PathBuf {
+    if let Some(home) = dirs_next::home_dir() {
+        let projects = home.join(".claude").join("projects");
+        if let Ok(rest) = file.strip_prefix(&projects) {
+            if let Some(first) = rest.components().next() {
+                return projects.join(first.as_os_str());
+            }
+        }
+    }
+    file.parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| file.to_path_buf())
+}
+
+/// Glob that ignores everything under `folder`.
+pub(crate) fn ignore_pattern_for_folder(folder: &std::path::Path) -> String {
+    format!("{}/*", folder.display())
 }
 
 /// Active filters for the results view.
@@ -168,6 +209,11 @@ struct App {
     /// because every other Results-screen key (jk, Tab, /, ?) should
     /// stay disabled while the prompt is up.
     results_redact_prompt: Option<ResultsRedactPrompt>,
+    /// Inline `i` prompt on the Results view: ignore this file or its folder.
+    results_ignore_prompt: Option<ResultsIgnorePrompt>,
+    /// `policy.ignore_patterns` as loaded from the config file at startup and
+    /// extended by `i` / Settings → Ignore during this session.
+    ignore_patterns: Vec<String>,
     history_screen: Option<HistoryScreen>,
     settings_screen: SettingsScreen,
     redact_screen: Option<RedactScreen>,
@@ -245,11 +291,11 @@ struct ScanProgress {
 }
 
 impl ScanProgress {
-    fn spawn() -> Self {
+    fn spawn(ignore: sanitai_core::config::IgnoreMatcher) -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_thread = Arc::clone(&cancel);
-        std::thread::spawn(move || run_auto_scan_progress(tx, cancel_thread));
+        std::thread::spawn(move || run_auto_scan_progress(tx, cancel_thread, ignore));
 
         // Open the store eagerly so we can write the in-progress placeholder
         // the moment the worker emits Plan. A failure here is non-fatal —
@@ -534,6 +580,8 @@ impl App {
             results_scroll: 0,
             results_detail_open: false,
             results_redact_prompt: None,
+            results_ignore_prompt: None,
+            ignore_patterns: load_ignore_patterns(),
             history_screen: None,
             settings_screen,
             redact_screen: None,
@@ -590,6 +638,21 @@ impl App {
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                             self.results_redact_prompt = None;
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                if self.results_ignore_prompt.is_some() {
+                    match code {
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            self.execute_results_ignore(true)
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            self.execute_results_ignore(false)
+                        }
+                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('n') => {
+                            self.results_ignore_prompt = None;
                         }
                         _ => {}
                     }
@@ -652,6 +715,7 @@ impl App {
                     KeyCode::Char('o') => self.open_selected_in_editor(),
                     KeyCode::Char('c') => self.copy_selected_fingerprint(),
                     KeyCode::Char('R') => self.begin_results_redact_prompt(),
+                    KeyCode::Char('i') => self.begin_results_ignore_prompt(),
                     KeyCode::Char('1') => {
                         self.filter.min_confidence = Some(Confidence::High);
                         self.results_scroll = 0;
@@ -705,19 +769,48 @@ impl App {
                 }
             }
 
-            AppState::Settings => match code {
-                KeyCode::Char('q') | KeyCode::Esc => {
-                    // Sync settings back to app before leaving.
-                    self.app_settings = self.settings_screen.settings.clone();
-                    self.state = AppState::Menu;
+            AppState::Settings => {
+                // While typing an ignore pattern every printable key is text.
+                if self.settings_screen.is_typing() {
+                    match code {
+                        KeyCode::Enter => {
+                            if let Some(p) = self.settings_screen.commit_ignore_input() {
+                                self.ignore_patterns.push(p);
+                            }
+                        }
+                        KeyCode::Esc => self.settings_screen.cancel_ignore_input(),
+                        KeyCode::Backspace => self.settings_screen.pop_ignore_char(),
+                        KeyCode::Char(c) => self.settings_screen.push_ignore_char(c),
+                        _ => {}
+                    }
+                    return;
                 }
-                KeyCode::Tab => self.settings_screen.next_tab(),
-                KeyCode::Char('j') | KeyCode::Down => self.settings_screen.move_down(),
-                KeyCode::Char('k') | KeyCode::Up => self.settings_screen.move_up(),
-                KeyCode::Char(' ') | KeyCode::Enter => self.settings_screen.toggle_selected(),
-                KeyCode::Char('?') => self.show_help = true,
-                _ => {}
-            },
+                match code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        // Sync settings back to app before leaving.
+                        self.app_settings = self.settings_screen.settings.clone();
+                        self.state = AppState::Menu;
+                    }
+                    KeyCode::Tab => self.settings_screen.next_tab(),
+                    KeyCode::Char('j') | KeyCode::Down => self.settings_screen.move_down(),
+                    KeyCode::Char('k') | KeyCode::Up => self.settings_screen.move_up(),
+                    KeyCode::Char('a')
+                        if self.settings_screen.active_tab == SettingsTab::Ignore =>
+                    {
+                        self.settings_screen.begin_ignore_input()
+                    }
+                    KeyCode::Char('d') | KeyCode::Delete
+                        if self.settings_screen.active_tab == SettingsTab::Ignore =>
+                    {
+                        if let Some(p) = self.settings_screen.remove_selected_ignore() {
+                            self.ignore_patterns.retain(|x| x != &p);
+                        }
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter => self.settings_screen.toggle_selected(),
+                    KeyCode::Char('?') => self.show_help = true,
+                    _ => {}
+                }
+            }
 
             AppState::Redact => {
                 if let Some(ref mut rs) = self.redact_screen {
@@ -873,6 +966,65 @@ impl App {
     /// live scan, and the redactor would either no-op or write an empty
     /// replacement that corrupts the source file. The user is steered to
     /// re-run the scan instead.
+    /// `i` on a Results row: offer to ignore the finding's project folder or
+    /// just its file. Nothing is written until the user picks a scope.
+    fn begin_results_ignore_prompt(&mut self) {
+        let Some(finding) = self.selected_finding() else {
+            self.current_tagline = "No finding selected.".to_owned();
+            return;
+        };
+        let file = finding.turn_id.0.as_ref().clone();
+        let folder = ignore_folder_for(&file);
+        self.results_ignore_prompt = Some(ResultsIgnorePrompt { file, folder });
+    }
+
+    /// Persist the chosen ignore pattern to the global config and drop every
+    /// finding it covers from the current results so the effect is instant;
+    /// the next scan skips those files entirely.
+    fn execute_results_ignore(&mut self, whole_folder: bool) {
+        let Some(prompt) = self.results_ignore_prompt.take() else {
+            return;
+        };
+        let pattern = if whole_folder {
+            ignore_pattern_for_folder(&prompt.folder)
+        } else {
+            prompt.file.display().to_string()
+        };
+        match sanitai_core::config::add_ignore_pattern(&pattern) {
+            Ok((path, added)) => {
+                if added {
+                    self.ignore_patterns.push(pattern.clone());
+                }
+                let matcher =
+                    sanitai_core::config::IgnoreMatcher::new(std::slice::from_ref(&pattern));
+                let removed = self
+                    .last_scan
+                    .as_mut()
+                    .map(|s| {
+                        let before = s.findings.len();
+                        s.findings
+                            .retain(|f| !matcher.is_ignored(f.turn_id.0.as_ref()));
+                        before - s.findings.len()
+                    })
+                    .unwrap_or(0);
+                self.results_scroll = 0;
+                let target = if whole_folder {
+                    &prompt.folder
+                } else {
+                    &prompt.file
+                };
+                let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                self.current_tagline = format!(
+                    "Ignoring {name} \u{2014} {removed} finding(s) removed; saved to {}.",
+                    path.display()
+                );
+            }
+            Err(e) => {
+                self.current_tagline = format!("Could not save ignore pattern: {e}");
+            }
+        }
+    }
+
     fn begin_results_redact_prompt(&mut self) {
         let Some(finding) = self.selected_finding() else {
             self.current_tagline = "No finding selected.".to_owned();
@@ -1038,6 +1190,7 @@ impl App {
             paths: Vec::new(),
             findings,
             cancelled: record.cancelled,
+            ignored_files: 0,
         };
 
         let scan_id_short: String = record.scan_id.chars().take(8).collect();
@@ -1059,7 +1212,9 @@ impl App {
             Some(MenuItem::Scan) => {
                 self.state = AppState::Scanning;
                 self.current_tagline = "On it.".to_owned();
-                self.scan_progress = Some(ScanProgress::spawn());
+                self.scan_progress = Some(ScanProgress::spawn(
+                    sanitai_core::config::IgnoreMatcher::new(&self.ignore_patterns),
+                ));
             }
             Some(MenuItem::History) => {
                 // Lazily load history from the store each time we open it.
@@ -1082,8 +1237,12 @@ impl App {
                 self.state = AppState::Redact;
             }
             Some(MenuItem::Settings) => {
-                // Sync current app_settings into the screen before opening.
-                self.settings_screen = SettingsScreen::new(self.app_settings.clone());
+                // Sync current app_settings (and the live ignore list) into
+                // the screen before opening.
+                self.settings_screen = SettingsScreen::with_ignore_patterns(
+                    self.app_settings.clone(),
+                    self.ignore_patterns.clone(),
+                );
                 self.state = AppState::Settings;
             }
             Some(MenuItem::Help) => {
@@ -1394,6 +1553,39 @@ fn render_results_redact_prompt(area: Rect, buf: &mut Buffer, prompt: &ResultsRe
     );
 }
 
+fn render_results_ignore_prompt(area: Rect, buf: &mut Buffer, prompt: &ResultsIgnorePrompt) {
+    if area.height == 0 {
+        return;
+    }
+    let row = area.bottom().saturating_sub(1);
+    buf.set_style(
+        Rect {
+            x: area.left(),
+            y: row,
+            width: area.width,
+            height: 1,
+        },
+        Style::default().bg(COLOR_BG),
+    );
+    let name = |p: &PathBuf| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let text = format!(
+        "  Ignore in future scans:  [p] project folder {}   [f] this file {}   [Esc] cancel",
+        name(&prompt.folder),
+        name(&prompt.file)
+    );
+    buf.set_string(
+        area.left(),
+        row,
+        text,
+        Style::default().fg(COLOR_WARN).add_modifier(Modifier::BOLD),
+    );
+}
+
 /// Render the footer bar.
 fn render_footer(area: Rect, buf: &mut Buffer, last_scan: Option<&str>) {
     buf.set_style(area, Style::default().bg(COLOR_BG).fg(COLOR_MUTED));
@@ -1687,6 +1879,9 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
                     if let Some(ref prompt) = app.results_redact_prompt {
                         render_results_redact_prompt(body_area, buf, prompt);
                     }
+                    if let Some(ref prompt) = app.results_ignore_prompt {
+                        render_results_ignore_prompt(body_area, buf, prompt);
+                    }
                 }
 
                 AppState::History => {
@@ -1840,6 +2035,51 @@ mod filter_tests {
         );
     }
 
+    /// `i` offers the Claude Code *project* directory for transcripts under
+    /// `~/.claude/projects`, and the parent directory for anything else.
+    #[test]
+    fn ignore_folder_is_project_dir_for_claude_code_else_parent() {
+        use crate::app::{ignore_folder_for, ignore_pattern_for_folder};
+        let home = dirs_next::home_dir().expect("home dir");
+        let projects = home.join(".claude").join("projects");
+        let file = projects
+            .join("-Users-me-Documents-git-sanitai")
+            .join("session")
+            .join("subagents")
+            .join("agent-1.jsonl");
+        assert_eq!(
+            ignore_folder_for(&file),
+            projects.join("-Users-me-Documents-git-sanitai")
+        );
+        assert_eq!(
+            ignore_pattern_for_folder(&projects.join("-Users-me-Documents-git-sanitai")),
+            format!(
+                "{}/*",
+                projects.join("-Users-me-Documents-git-sanitai").display()
+            )
+        );
+        let other = std::path::Path::new(
+            "/Users/me/Library/Application Support/Cursor/User/workspaceStorage/abc/state.vscdb",
+        );
+        assert_eq!(
+            ignore_folder_for(other),
+            std::path::PathBuf::from(
+                "/Users/me/Library/Application Support/Cursor/User/workspaceStorage/abc"
+            )
+        );
+        // The pattern produced for a folder matches files beneath it and
+        // nothing beside it.
+        let m = sanitai_core::config::IgnoreMatcher::new(&[ignore_pattern_for_folder(
+            &projects.join("-Users-me-Documents-git-sanitai"),
+        )]);
+        assert!(m.is_ignored(&file));
+        assert!(!m.is_ignored(
+            &projects
+                .join("-Users-me-Documents-git-other")
+                .join("s.jsonl")
+        ));
+    }
+
     /// One secret echoed across three turns and two files is one row when
     /// grouped (with the occurrence count), three rows when ungrouped.
     #[test]
@@ -1876,6 +2116,7 @@ mod filter_tests {
                 mk("/b.jsonl", 4, "postgres://other:pw@h/db"),
             ],
             cancelled: false,
+            ignored_files: 0,
         };
         let grouped = ResultsFilter::default();
         let rows = crate::results::visible_groups(&summary, Some(&grouped));
@@ -1974,6 +2215,7 @@ mod results_redact_tests {
             paths: vec![source_path.to_path_buf()],
             findings: vec![f],
             cancelled: false,
+            ignored_files: 0,
         };
 
         App {
@@ -1987,6 +2229,8 @@ mod results_redact_tests {
             results_scroll: 0,
             results_detail_open: false,
             results_redact_prompt: None,
+            results_ignore_prompt: None,
+            ignore_patterns: Vec::new(),
             history_screen: None,
             settings_screen,
             redact_screen: None,
@@ -2171,6 +2415,7 @@ mod group_tests {
                 mk("/b.jsonl", 3, "postgres://o:x@h/db", Confidence::Medium),
             ],
             cancelled: false,
+            ignored_files: 0,
         };
         App {
             menu: Menu::new(),
@@ -2183,6 +2428,8 @@ mod group_tests {
             results_scroll: 0,
             results_detail_open: false,
             results_redact_prompt: None,
+            results_ignore_prompt: None,
+            ignore_patterns: Vec::new(),
             history_screen: None,
             settings_screen,
             redact_screen: None,
@@ -2311,6 +2558,8 @@ mod history_reload_tests {
             results_scroll: 0,
             results_detail_open: false,
             results_redact_prompt: None,
+            results_ignore_prompt: None,
+            ignore_patterns: Vec::new(),
             history_screen: Some(crate::history_screen::HistoryScreen::new(records)),
             settings_screen,
             redact_screen: None,
