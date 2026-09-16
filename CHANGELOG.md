@@ -5,6 +5,14 @@ entries are generated from conventional commit subjects on each release.
 
 <!-- version list -->
 
+## v0.5.0 (2026-09-16)
+
+### Features
+
+- **scan**: Ignore patterns via config, --ignore, and the TUI
+  ([`e036d18`](https://github.com/thepixelabs/sanitai/commit/e036d188621cc0a4a26a74282da6870a3a8b3ae4))
+
+
 ## v0.4.3 (2026-09-15)
 
 ### Bug Fixes
