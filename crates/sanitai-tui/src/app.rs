@@ -924,8 +924,9 @@ impl App {
                 }
                 Err(e) => {
                     tracing::warn!("editor spawn failed: {e}");
+                    let display_bin = argv.first().cloned().unwrap_or_default();
                     self.current_tagline =
-                        "No editor found. Set $VISUAL or install code/cursor/subl/vim.".to_owned();
+                        format!("Could not launch {}: {e}", basename(&display_bin));
                 }
             },
             EditorResolution::NoEditor => {
@@ -1218,10 +1219,15 @@ impl App {
             }
             Some(MenuItem::History) => {
                 // Lazily load history from the store each time we open it.
-                let records = Store::open()
-                    .ok()
-                    .and_then(|s| s.recent_scans(200).ok())
-                    .unwrap_or_default();
+                // A store error must not masquerade as "no scans yet".
+                let records = match Store::open().and_then(|s| s.recent_scans(200)) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!("history load failed: {e}");
+                        self.current_tagline = format!("Could not read history: {e}");
+                        Vec::new()
+                    }
+                };
                 self.history_screen = Some(HistoryScreen::new(records));
                 self.state = AppState::History;
             }
@@ -1808,6 +1814,17 @@ fn install_panic_hook() {
 /// Public entry point called from sanitai-cli.
 pub fn run() -> Result<()> {
     install_panic_hook();
+
+    // Sandbox the whole TUI process once, up front, with the *permissive*
+    // profile: no network, everything else allowed. The strict profile the
+    // CLI uses for its one-shot scan also denies process-exec and file
+    // creation, and `sandbox_init` is process-wide — applied from the scan
+    // worker it used to silently break every later action (`o` open in
+    // editor, `c` copy, `R` redact, `i` ignore, reopening History).
+    let sandbox = sanitai_sandbox::create_sandbox();
+    if let Err(e) = sandbox.apply_permissive() {
+        tracing::warn!("TUI sandbox (permissive) failed, continuing without: {e}");
+    }
 
     // Initialise App (opens Store, reads last scan) before raw mode so any
     // startup errors surface as normal terminal output.

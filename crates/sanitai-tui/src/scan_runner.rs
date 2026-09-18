@@ -20,7 +20,6 @@ use sanitai_detectors::{
     TransformDetector,
 };
 use sanitai_parsers::{discover_all, ChatGptParser, ClaudeJsonlParser};
-use sanitai_sandbox::create_sandbox;
 
 use futures::StreamExt;
 
@@ -92,11 +91,10 @@ pub fn run_auto_scan_progress(
         .unwrap_or(Duration::ZERO)
         .as_nanos() as i64;
 
-    // Apply OS-level sandbox before touching untrusted files.
-    let sandbox = create_sandbox();
-    if let Err(e) = sandbox.apply_strict() {
-        tracing::warn!("TUI sandbox apply_strict failed (non-fatal): {e}");
-    }
+    // No sandbox call here on purpose: `sandbox_init` is process-wide, and
+    // the TUI applies the permissive (network-denying) profile once at
+    // startup in `app::run`. The strict profile would also deny exec and
+    // file creation for the rest of the session.
 
     let home = dirs_next::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let discovered = discover_all(&home);
