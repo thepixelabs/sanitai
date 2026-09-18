@@ -5,6 +5,14 @@ entries are generated from conventional commit subjects on each release.
 
 <!-- version list -->
 
+## v0.5.1 (2026-09-18)
+
+### Bug Fixes
+
+- **tui**: Stop the scan sandbox from breaking later actions
+  ([`20b60d2`](https://github.com/thepixelabs/sanitai/commit/20b60d2f3be0d5b04c139fadcee96345c6abd0af))
+
+
 ## v0.5.0 (2026-09-16)
 
 ### Features
