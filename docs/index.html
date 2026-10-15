@@ -509,6 +509,19 @@
       align-items: end;
     }
     .hero__left { min-width: 0; }
+    .hero__status {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: var(--text-2);
+      border: 1px solid currentColor;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: var(--space-5);
+      max-width: 34rem;
+    }
+    .hero__status strong { letter-spacing: 0.1em; text-transform: uppercase; }
+
     .hero__eyebrow {
       font-family: var(--font-mono);
       font-size: var(--fs-eyebrow);
@@ -1186,6 +1199,7 @@
 ============================================================ -->
 <section class="hero" aria-labelledby="hero-heading">
   <div class="container container--wide">
+    <p class="hero__status" role="note"><strong>Unmaintained.</strong> Development has stopped. SanitAI works as-is and stays open source, but new features and issue replies are not expected. Forks welcome.</p>
     <div class="hero__grid">
       <!-- Left: copy + install -->
       <div class="hero__left">
@@ -1195,7 +1209,6 @@
         </h1>
         <p class="hero__sub">
           SanitAI scans your local LLM conversation history for leaked API keys, database credentials, and PII. Entirely on your machine. Zero network calls. No account.
-          <strong>Unmaintained:</strong> development has stopped. It works as-is and stays open source, but new features and issue replies are not expected. Forks welcome.
         </p>
         <div class="trust-strip" role="list" aria-label="Key features">
           <span class="trust-pill" role="listitem">100% offline</span>
