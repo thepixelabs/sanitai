@@ -18,10 +18,6 @@ ignore = [
   # transitively by ratatui; no security impact, no drop-in replacement
   # yet. Revisit when ratatui upgrades its macro stack.
   "RUSTSEC-2024-0436",
-  # `rand` 0.8 is unsound only when a custom `log` logger calls
-  # `rand::rng()` (RUSTSEC-2026-0097). SanitAI does not install a custom
-  # logger — this advisory is not reachable in our call graph.
-  "RUSTSEC-2026-0097",
 ]
 
 [licenses]
